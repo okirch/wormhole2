@@ -1139,19 +1139,19 @@ pathutil_parser_next(struct pathutil_parser *parser)
 	unsigned int n;
 
 	if ((src = parser->pos) == NULL)
-		return NULL;
+		return false;
 
 	while (*src == '/')
 		++src;
 	if (*src == '\0')
-		return NULL;
+		return false;
 
 	dst = parser->namebuf;
 	end = parser->namebuf + sizeof(parser->namebuf);
 	while (*src && *src != '/') {
 		if (dst + 1 >= end) {
 			log_error("path component too long\n");
-			return NULL;
+			return false;
 		}
 		*dst++ = *src++;
 	}
@@ -1164,7 +1164,7 @@ pathutil_parser_next(struct pathutil_parser *parser)
 	parser->pathbuf[n] = '\0';
 
 	parser->pos = src;
-	return parser->namebuf;
+	return true;
 }
 
 void
