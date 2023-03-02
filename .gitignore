@@ -1,3 +1,5 @@
+wormhole
+wormhole-*.tar.bz2
 *.o
 *.a
 .*.swp

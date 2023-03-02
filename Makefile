@@ -1,3 +1,5 @@
+VERSION		= 2.0
+
 BINDIR		= /usr/bin
 SBINDIR		= /usr/sbin
 ETCDIR		= /etc/wormhole
@@ -71,3 +73,9 @@ endif
 
 depend:
 	gcc $(CFLAGS) -MM *.c >.depend
+
+dist:
+	mkdir wormhole-$(VERSION)
+	cp $$(git ls-files) wormhole-$(VERSION)
+	tar cvjf wormhole-$(VERSION).tar.bz2 wormhole-$(VERSION)/
+	rm -rf wormhole-$(VERSION)
