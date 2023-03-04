@@ -510,6 +510,13 @@ fsutil_tempdir_cleanup(struct fsutil_tempdir *td)
 	if (!fsutil_tempdir_unmount(td))
 		return -1;
 
+	/* Child process may have mounted something but failed to detach root.
+	 * This can happen if we run in a chroot env, like osc local build */
+        if (rmdir(td->path) < 0 && errno == EBUSY) {
+		trace("%s is still busy, trying to unmounted", td->path);
+		(void) umount2(td->path, MNT_DETACH);
+	}
+
         if (rmdir(td->path) < 0) {
                 log_error("Unable to remove temporary mountpoint %s: %m", td->path);
 		sleep(1);
