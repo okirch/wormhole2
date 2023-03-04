@@ -820,7 +820,11 @@ mount_farm_discover_system_dir_with_submounts(struct mount_farm *farm, struct mo
 				}
 			}
 
-			/* printf("%s/%s: is a DIR\n", dir_path, d->d_name); */
+			if (mount_farm_has_mount_for(farm, system_path)) {
+				trace("we already have a mount for %s", system_path);
+				goto next;
+			}
+
 			child = mount_farm_lookup(to_be_exported, d->d_name, false);
 			if (child == NULL || child->children == NULL) {
 				/* There is no mount point for this directory, and no mount point below it.
@@ -828,8 +832,8 @@ mount_farm_discover_system_dir_with_submounts(struct mount_farm *farm, struct mo
 				 */
 				if (mount_farm_add_system_dir(farm, system_path) == NULL)
 					okay = false;
-			} else
-			if (!mount_farm_has_mount_for(farm, child->relative_path)) {
+			} else {
+				trace("we do not yet have a mount for %s", child->relative_path);
 				if (!mount_farm_discover_system_dir_with_submounts(farm, child, always_use_overlays))
 					okay = false;
 			}
