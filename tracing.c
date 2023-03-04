@@ -212,6 +212,7 @@ static void
 __tracing_update_hooks(void)
 {
 	switch (tracing_level) {
+	default:
 	case 3:
 		__tracing_hook3 = log_debug;
 	case 2:
