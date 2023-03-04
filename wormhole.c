@@ -363,6 +363,7 @@ mount_leaf_mount(const struct mount_leaf *leaf)
 	}
 
 	trace2("Mounted %s: %s\n", leaf->mountpoint, lowerspec);
+	trace3("  mount option %s", options);
 
 	free(lowerspec);
 	return leaf;
@@ -994,10 +995,6 @@ perform_build(struct wormhole_context *ctx)
 	int status, exit_status;
 
 	log_info("Performing build:\n");
-	//system("ls -la /usr/lib/sysimage/rpm");
-
-	system("rpm -ivh /var/cache/zypp/packages/openSUSE-Leap-15.4-1/noarch/python3-parse-1.15.0-bp154.1.64.noarch.rpm");
-
 	if (!procutil_command_run(&ctx->command, &status)) {
 		exit_status = 12;
 	} else
@@ -1403,6 +1400,7 @@ do_build(struct wormhole_context *ctx)
 	if (!wormhole_context_perform_in_container(ctx, __prune_build))
 		return;
 
+	log_info("New image can be found in %s", ctx->build_root);
 	ctx->exit_status = 0;
 }
 
