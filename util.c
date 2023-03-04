@@ -1088,9 +1088,15 @@ fsutil_lazy_umount(const char *path)
 }
 
 bool
-fsutil_make_fs_private(const char *dir)
+fsutil_make_fs_private(const char *dir, bool maybe_in_chroot)
 {
 	if (mount("none", dir, NULL, MS_REC|MS_PRIVATE, NULL) == -1) {
+		if (errno == EINVAL && maybe_in_chroot) {
+			log_warning("Cannot change filesystem propagation of \"%s\" to private: %m", dir);
+			log_warning("Probably running in a chroot; proceeding with caution");
+			return true;
+		}
+
 		log_error("Cannot change filesystem propagation of \"%s\" to private: %m", dir);
 		return false;
 	}

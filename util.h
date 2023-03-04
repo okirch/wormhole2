@@ -108,8 +108,9 @@ extern bool			fsutil_mount_virtual_fs(const char *where,
 					const char *fstype,
 					const char *options);
 extern bool			fsutil_lazy_umount(const char *path);
-extern bool			fsutil_make_fs_private(const char *dir);
+extern bool			fsutil_make_fs_private(const char *dir, bool maybe_in_chroot);
 extern bool			fsutil_same_file(const char *path1, const char *path2);
+extern bool			fsutil_dir_is_mountpoint(const char *path);
 
 extern bool			strutil_equal(const char *s1, const char *s2);
 extern bool			strutil_string_in_list(const char *needle, const char **haystack);

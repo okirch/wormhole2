@@ -18,6 +18,7 @@
  *   Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
+#include <sys/stat.h>
 #include <stdio.h>
 #include <mntent.h>
 #include <stdbool.h>
@@ -95,4 +96,31 @@ mount_state_discover(const char *mtab,
 		void *user_data)
 {
 	return __get_mount_state(mtab, NULL, report_fn, user_data);
+}
+
+bool
+fsutil_dir_is_mountpoint(const char *path)
+{
+	struct stat stb1, stb2;
+	FILE *mf;
+	struct mntent *m;
+	bool is_mount = false;
+
+	if (stat(path, &stb1) < 0)
+		return false;
+
+	if ((mf = setmntent("/proc/mounts", "r")) == NULL) {
+		log_error("Unable to open /proc/mounts: %m");
+		return false;
+	}
+
+	while (!is_mount && (m = getmntent(mf)) != NULL) {
+		if (stat(m->mnt_dir, &stb2) >= 0) {
+			is_mount = (stb1.st_dev == stb2.st_dev)
+			       &&  (stb1.st_ino == stb2.st_ino);
+		}
+	}
+	endmntent(mf);
+
+	return is_mount;
 }

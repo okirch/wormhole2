@@ -37,6 +37,7 @@
 #include "util.h"
 
 static unsigned int	num_mounted;
+bool			wormhole_in_chroot = false;
 
 static bool
 __mount_bind(const char *src, const char *dst, int extra_flags)
@@ -1137,7 +1138,7 @@ wormhole_context_detach(struct wormhole_context *ctx)
 			return false;
 	}
 
-	if (!fsutil_make_fs_private("/"))
+	if (!fsutil_make_fs_private("/", wormhole_in_chroot))
 		return false;
 
 	if (!fsutil_tempdir_mount(&ctx->temp))
@@ -1236,16 +1237,26 @@ wormhole_context_switch_root(struct wormhole_context *ctx)
 {
 	struct mount_farm *farm = ctx->farm;
 
-	/* bind mount the chroot directory to /mnt, then clean up the temp dir. */
-	if (!__mount_bind(farm->chroot, "/mnt", MS_REC))
-		return 1;
+	if (wormhole_in_chroot) {
+		/* Not optimal. Any mounts will propagate, and will be
+		 * visible even outside the chroot environment :-( */
+		chdir(farm->chroot);
+		if (chroot(farm->chroot) < 0) {
+			perror("chroot");
+			return 1;
+		}
+	} else {
+		/* bind mount the chroot directory to /mnt, then clean up the temp dir. */
+		if (!__mount_bind(farm->chroot, "/mnt", MS_REC))
+			return 1;
 
-	fsutil_tempdir_unmount(&ctx->temp);
+		fsutil_tempdir_unmount(&ctx->temp);
 
-	chdir("/mnt");
-	if (chroot("/mnt") < 0) {
-		perror("chroot");
-		return 1;
+		chdir("/mnt");
+		if (chroot("/mnt") < 0) {
+			perror("chroot");
+			return 1;
+		}
 	}
 
 	if (setgid(0) < 0)
@@ -1470,6 +1481,12 @@ main(int argc, char **argv)
 		log_fatal("Missing command to be executed\n");
 
 	tracing_set_level(opt_debug);
+	trace("debug level set to %u\n", tracing_level);
+
+	if (!fsutil_dir_is_mountpoint("/")) {
+		log_warning("Running inside what looks like a chroot environment.");
+		wormhole_in_chroot = true;
+	}
 
 	ctx = wormhole_context_new();
 
