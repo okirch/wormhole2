@@ -1123,6 +1123,42 @@ wormhole_layer_save_config(struct wormhole_layer *layer)
 	return true;
 }
 
+bool
+wormhole_layer_patch_rpmdb(struct wormhole_layer *layer, const char *rpmdb_orig)
+{
+	char cmdbuf[1024];
+
+	snprintf(cmdbuf, sizeof(cmdbuf),
+			"rpmhack --orig-root '%s' --patch-path '%s' patch %s",
+			rpmdb_orig, layer->rpmdb_path, layer->image_path);
+	trace("Executing %s", cmdbuf);
+
+	if (system(cmdbuf) != 0) {
+		log_error("Failed to patch RPM database for layer %s", layer->name);
+		return false;
+	}
+
+	return true;
+}
+
+bool
+wormhole_layer_diff_rpmdb(struct wormhole_layer *layer, const char *rpmdb_orig)
+{
+	char cmdbuf[1024];
+
+	snprintf(cmdbuf, sizeof(cmdbuf),
+			"rpmhack --orig-root '%s' --patch-path '%s' diff %s",
+			rpmdb_orig, layer->rpmdb_path, layer->image_path);
+	trace("Executing %s", cmdbuf);
+
+	if (system(cmdbuf) != 0) {
+		log_error("Failed to create RPM database diff for layer %s", layer->name);
+		return false;
+	}
+
+	trace("Created RPM database diff %s", layer->rpmdb_path);
+	return true;
+}
 
 void
 wormhole_layer_array_append(struct wormhole_layer_array *a, struct wormhole_layer *layer)
@@ -1342,6 +1378,17 @@ prepare_tree_for_building(struct wormhole_context *ctx)
 
 	if (!mount_farm_assemble_for_build(farm, &ctx->layers))
 		return false;
+
+	if (ctx->manage_rpmdb && ctx->layers.count) {
+		const char *rpmdb_orig = RPMDB_PATH;
+		unsigned int i;
+
+		trace("Building RPM database");
+		for (i = 0; i < ctx->layers.count; ++i) {
+			if (!wormhole_layer_patch_rpmdb(ctx->layers.data[i], rpmdb_orig))
+				return false;
+		}
+	}
 
 	return true;
 }
@@ -1565,6 +1612,17 @@ do_build(struct wormhole_context *ctx)
 
 		if (used->depth == 0)
 			layer->used[layer->nused++] = strdup(used->name);
+	}
+
+	if (ctx->manage_rpmdb) {
+		const char *rpmdb_orig = RPMDB_PATH;
+
+		if (ctx->layers.count)
+			rpmdb_orig = ctx->layers.data[ctx->layers.count - 1]->rpmdb_path;
+		if (!wormhole_layer_diff_rpmdb(layer, rpmdb_orig)) {
+			log_error("Failed to create RPM database diff");
+			return;
+		}
 	}
 
 	if (!wormhole_layer_save_config(layer)) {
