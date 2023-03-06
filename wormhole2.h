@@ -59,8 +59,15 @@ struct mount_bind {
 struct wormhole_layer {
 	char *			name;
 	char *			path;
+	char *			config_path;
 	char *			image_path;
 	char *			rpmdb_path;
+
+	/* if 0, referenced by command line */
+	unsigned int		depth;
+
+	unsigned int		nused;
+	char *			used[LOWER_LAYERS_MAX];
 
 	struct mount_state *	tree;
 };
