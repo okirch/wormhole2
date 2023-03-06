@@ -56,14 +56,27 @@ struct mount_bind {
 
 #define CONTEXT_LOWER_MAX	8
 
+struct wormhole_layer {
+	char *			name;
+	char *			path;
+	char *			image_path;
+	char *			rpmdb_path;
+
+	struct mount_state *	tree;
+};
+
+struct wormhole_layer_array {
+	unsigned int		count;
+	struct wormhole_layer **data;
+};
+
 struct wormhole_context {
 	unsigned int		purpose;
 	int			exit_status;
 
 	char *			workspace;
 	struct procutil_command	command;
-	unsigned int		num_layers_used;
-	char *			layers_used[CONTEXT_LOWER_MAX];
+	struct wormhole_layer_array layers;
 
 	char *			build_target;
 	char *			build_root;

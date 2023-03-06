@@ -33,6 +33,7 @@
 #include <assert.h>
 
 #include "wormhole2.h"
+#include "paths.h"
 #include "tracing.h"
 #include "util.h"
 
@@ -729,13 +730,13 @@ __mount_layer_discover_callback(const char *dir_path, const struct dirent *d, in
 }
 
 static struct mount_state *
-mount_layer_discover(const char *layer_path)
+mount_layer_discover(struct wormhole_layer *layer)
 {
-	char *tree_path = concat_path(layer_path, "image");
+	char *tree_path = layer->image_path;
 	struct mount_state *state;
 	bool okay = false;
 
-	trace("%s(%s)", __func__, layer_path);
+	trace("%s(%s)", __func__, layer->image_path);
 
 	/* Walk the directory tree below $layer/image */
 	state = mount_state_new();
@@ -913,10 +914,11 @@ mount_farm_apply_layer(struct mount_farm *farm, struct mount_state *layer_state)
 }
 
 bool
-mount_farm_discover(struct mount_farm *farm, struct mount_state *layer_state)
+mount_farm_discover(struct mount_farm *farm, struct wormhole_layer_array *layers)
 {
 	struct mount_state *state = NULL;
 	bool okay = false, use_overlays = true;
+	unsigned int i;
 
 	state = mount_state_new();
 
@@ -933,8 +935,8 @@ mount_farm_discover(struct mount_farm *farm, struct mount_state *layer_state)
 	mount_farm_discover_system_dir(farm, state, "/lib64");
 	mount_farm_discover_system_dir(farm, state, "/usr");
 
-	if (layer_state) {
-		if (!mount_farm_apply_layer(farm, layer_state))
+	for (i = 0; i < layers->count; ++i) {
+		if (!mount_farm_apply_layer(farm, layers->data[i]->tree))
 			goto out;
 		use_overlays = false;
 	}
@@ -948,7 +950,7 @@ out:
 }
 
 bool
-mount_farm_assemble_for_build(struct mount_farm *farm)
+mount_farm_assemble_for_build(struct mount_farm *farm, struct wormhole_layer_array *layers)
 {
 	mount_farm_add_virtual_mount(farm, "/proc", "proc");
 	mount_farm_add_virtual_mount(farm, "/sys", "sysfs");
@@ -957,16 +959,15 @@ mount_farm_assemble_for_build(struct mount_farm *farm)
 	mount_farm_add_virtual_mount(farm, "/run", "tmpfs");
 	mount_farm_add_virtual_mount(farm, "/boot", "hidden");
 
-	if (!mount_farm_discover(farm, NULL))
+	if (!mount_farm_discover(farm, layers))
 		return false;
 
 	return true;
 }
 
 bool
-mount_farm_assemble_for_run(struct mount_farm *farm, const char *image_layer_path)
+mount_farm_assemble_for_run(struct mount_farm *farm, struct wormhole_layer_array *layers)
 {
-	struct mount_state *layer_state = NULL;
 	bool okay = false;
 
 	mount_farm_bind_system_dir(farm, "/proc");
@@ -975,17 +976,7 @@ mount_farm_assemble_for_run(struct mount_farm *farm, const char *image_layer_pat
 	mount_farm_bind_system_dir(farm, "/run");
 	mount_farm_add_virtual_mount(farm, "/boot", "hidden");
 
-	layer_state = mount_layer_discover(image_layer_path);
-	if (!layer_state) {
-		log_error("%s does not look like a valid wormhole layer", image_layer_path);
-		goto out;
-	}
-
-	okay = mount_farm_discover(farm, layer_state);
-
-out:
-	if (layer_state)
-		mount_state_free(layer_state);
+	okay = mount_farm_discover(farm, layers);
 	return okay;
 }
 
@@ -1027,6 +1018,73 @@ enum {
 	__PURPOSE_MESSING_AROUND,
 };
 
+struct wormhole_layer *
+wormhole_layer_new(const char *name)
+{
+	struct wormhole_layer *layer;
+
+	layer = calloc(1, sizeof(*layer));
+	layer->name = strdup(name);
+	layer->path = concat_path(WORMHOLE_LAYER_BASE_PATH, name);
+	layer->image_path = concat_path(layer->path, "image");
+	layer->rpmdb_path = concat_path(layer->path, "rpm.patch");
+
+	return layer;
+}
+
+void
+wormhole_layer_free(struct wormhole_layer *layer)
+{
+	strutil_set(&layer->name, NULL);
+	strutil_set(&layer->path, NULL);
+	strutil_set(&layer->image_path, NULL);
+	strutil_set(&layer->rpmdb_path, NULL);
+
+	if (layer->tree)
+		mount_state_free(layer->tree);
+	layer->tree = NULL;
+
+	free(layer);
+}
+
+void
+wormhole_layer_array_append(struct wormhole_layer_array *a, struct wormhole_layer *layer)
+{
+	if ((a->count & 15) == 0) {
+		a->data = realloc(a->data, (a->count + 16) * sizeof(a->data[0]));
+	}
+
+	a->data[a->count++] = layer;
+}
+
+struct wormhole_layer *
+wormhole_layer_array_find(struct wormhole_layer_array *a, const char *name)
+{
+	struct wormhole_layer *layer;
+	unsigned int i;
+
+	for (i = 0; i < a->count; ++i) {
+		layer = a->data[i];
+		if (!strcmp(layer->name, name))
+			return layer;
+	}
+
+	return NULL;
+}
+
+void
+wormhole_layer_array_destroy(struct wormhole_layer_array *a)
+{
+	unsigned int i;
+
+	for (i = 0; i < a->count; ++i)
+		wormhole_layer_free(a->data[i]);
+
+	if (a->data)
+		free(a->data);
+	memset(a, 0, sizeof(*a));
+}
+
 void
 wormhole_context_free(struct wormhole_context *ctx)
 {
@@ -1039,6 +1097,8 @@ wormhole_context_free(struct wormhole_context *ctx)
 		mount_farm_free(ctx->farm);
 		ctx->farm = NULL;
 	}
+
+	wormhole_layer_array_destroy(&ctx->layers);
 
 	free(ctx);
 }
@@ -1092,19 +1152,20 @@ wormhole_context_set_build(struct wormhole_context *ctx, const char *name, const
 bool
 wormhole_context_use_layer(struct wormhole_context *ctx, const char *name)
 {
-	unsigned int i;
+	struct wormhole_layer *layer;
 
-	for (i = 0; i < ctx->num_layers_used; ++i) {
-		if (!strcmp(ctx->layers_used[i], name))
-			return true;
-	}
+	if (wormhole_layer_array_find(&ctx->layers, name))
+		return true;
 
-	if (ctx->num_layers_used > CONTEXT_LOWER_MAX) {
-		log_error("Unable to handle this many layers");
+	layer = wormhole_layer_new(name);
+
+	if (!(layer->tree = mount_layer_discover(layer))) {
+		log_error("%s does not look like a valid wormhole layer", layer->path);
+		wormhole_layer_free(layer);
 		return false;
 	}
 
-	ctx->layers_used[ctx->num_layers_used++] = strdup(name);
+	wormhole_layer_array_append(&ctx->layers, layer);
 	return true;
 }
 
@@ -1177,7 +1238,7 @@ prepare_tree_for_building(struct wormhole_context *ctx)
 	if (!mount_farm_set_upper_base(farm, ctx->build_root))
 		return false;
 
-	if (!mount_farm_assemble_for_build(farm))
+	if (!mount_farm_assemble_for_build(farm, &ctx->layers))
 		return false;
 
 	return true;
@@ -1187,15 +1248,8 @@ static bool
 prepare_tree_for_use(struct wormhole_context *ctx)
 {
 	struct mount_farm *farm = ctx->farm;
-	const char *layer_name;
 
-	if (ctx->num_layers_used != 1) {
-		log_error("Must specify exactly one layer via --use (for now)");
-		return false;
-	}
-	layer_name = ctx->layers_used[0];
-
-	if (!mount_farm_assemble_for_run(farm, layer_name))
+	if (!mount_farm_assemble_for_run(farm, &ctx->layers))
 		return false;
 
 	return true;
