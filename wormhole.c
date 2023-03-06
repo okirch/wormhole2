@@ -732,7 +732,7 @@ __mount_layer_discover_callback(const char *dir_path, const struct dirent *d, in
 static struct mount_state *
 mount_layer_discover(struct wormhole_layer *layer)
 {
-	char *tree_path = layer->image_path;
+	const char *tree_path = layer->image_path;
 	struct mount_state *state;
 	bool okay = false;
 
@@ -751,7 +751,6 @@ mount_layer_discover(struct wormhole_layer *layer)
 		state = NULL;
 	}
 
-	free(tree_path);
 	return state;
 }
 
