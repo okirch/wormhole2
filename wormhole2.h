@@ -70,6 +70,7 @@ struct wormhole_context {
 
 	struct mount_farm *	farm;
 
+	bool			manage_rpmdb;
 	bool			use_privileged_namespace;
 
 	struct fsutil_tempdir	temp;

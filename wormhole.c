@@ -1432,11 +1432,16 @@ do_run(struct wormhole_context *ctx)
 	ctx->exit_status = 0;
 }
 
+enum {
+	OPT_RPMDB = 256,
+};
+
 static struct option	long_options[] = {
-	{ "debug",	no_argument,		NULL,	'd'	},
-	{ "build",	required_argument,	NULL,	'B'	},
-	{ "buildroot",	required_argument,	NULL,	'R'	},
-	{ "use",	required_argument,	NULL,	'u'	},
+	{ "debug",	no_argument,		NULL,	'd'		},
+	{ "build",	required_argument,	NULL,	'B'		},
+	{ "buildroot",	required_argument,	NULL,	'R'		},
+	{ "use",	required_argument,	NULL,	'u'		},
+	{ "rpmdb",	no_argument,		NULL,	OPT_RPMDB	},
 
 	{ NULL },
 };
@@ -1449,6 +1454,7 @@ main(int argc, char **argv)
 	const char *opt_build_root = NULL;
 	unsigned int opt_use_count = 0;
 	const char *opt_use[CONTEXT_LOWER_MAX];
+	bool opt_rpmdb = false;
 	struct wormhole_context *ctx;
 	int exit_status = 1;
 	int c;
@@ -1473,6 +1479,10 @@ main(int argc, char **argv)
 			opt_use[opt_use_count++] = optarg;
 			break;
 
+		case OPT_RPMDB:
+			opt_rpmdb = true;
+			break;
+
 		default:
 			log_error("Unknown option\n");
 			return 1;
@@ -1493,6 +1503,7 @@ main(int argc, char **argv)
 	ctx = wormhole_context_new();
 
 	wormhole_context_set_command(ctx, argv + optind);
+	ctx->manage_rpmdb = opt_rpmdb;
 
 	if (!wormhole_context_use_layers(ctx, opt_use_count, opt_use))
 		goto out;
