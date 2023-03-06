@@ -54,7 +54,7 @@ struct mount_bind {
 	char *		dest;
 };
 
-#define CONTEXT_LOWER_MAX	8
+#define LOWER_LAYERS_MAX	8
 
 struct wormhole_layer {
 	char *			name;

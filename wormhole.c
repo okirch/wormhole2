@@ -1507,7 +1507,7 @@ main(int argc, char **argv)
 	const char *opt_build = NULL;
 	const char *opt_build_root = NULL;
 	unsigned int opt_use_count = 0;
-	const char *opt_use[CONTEXT_LOWER_MAX];
+	const char *opt_use[LOWER_LAYERS_MAX];
 	bool opt_rpmdb = false;
 	struct wormhole_context *ctx;
 	int exit_status = 1;
@@ -1528,7 +1528,7 @@ main(int argc, char **argv)
 			break;
 
 		case 'u':
-			if (opt_use_count >= CONTEXT_LOWER_MAX)
+			if (opt_use_count >= LOWER_LAYERS_MAX)
 				log_fatal("Too many lower layers given");
 			opt_use[opt_use_count++] = optarg;
 			break;
