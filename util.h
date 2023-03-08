@@ -23,7 +23,11 @@
 
 #include <sys/types.h>
 #include <dirent.h>
-#include "types.h"
+
+struct strutil_array {
+	unsigned int		count;
+	char **			data;
+};
 
 struct fsutil_tempdir {
 	char *		path;
