@@ -211,6 +211,10 @@ set_logfile(const char *filename)
 static void
 __tracing_update_hooks(void)
 {
+	__tracing_hook = NULL;
+	__tracing_hook2 = NULL;
+	__tracing_hook3 = NULL;
+
 	switch (tracing_level) {
 	default:
 	case 3:
@@ -219,6 +223,8 @@ __tracing_update_hooks(void)
 		__tracing_hook2 = log_debug;
 	case 1:
 		__tracing_hook = log_debug;
+		break;
+	case 0:
 		break;
 	}
 }
