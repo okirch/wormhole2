@@ -37,6 +37,7 @@ struct fsutil_tempdir {
 extern const char *		pathutil_const_basename(const char *path);
 extern const char *		pathutil_dirname(const char *path);
 extern char *			pathutil_sanitize(const char *path);
+extern void			pathutil_concat2(char **path_p, const char *parent, const char *name);
 
 struct procutil_command {
 	const char *	root_directory;

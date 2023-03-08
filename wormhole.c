@@ -75,14 +75,6 @@ concat_path(const char *parent, const char *name)
 	return NULL;
 }
 
-void
-pathutil_concat2(char **path_p, const char *parent, const char *name)
-{
-	const char *path = __concat_path(parent, name);
-
-	strutil_set(path_p, path);
-}
-
 static const char *
 mount_farm_mkdir(const char *parent, const char *name)
 {

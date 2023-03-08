@@ -150,6 +150,17 @@ pathutil_sanitize(const char *path)
 	return strdup(result);
 }
 
+void
+pathutil_concat2(char **path_p, const char *parent, const char *name)
+{
+	static char path[PATH_MAX];
+
+	snprintf(path, sizeof(path), "%s/%s", parent, name);
+
+	strutil_set(path_p, NULL);
+	*path_p = pathutil_sanitize(path);
+}
+
 bool
 strutil_string_in_list(const char *needle, const char **haystack)
 {
