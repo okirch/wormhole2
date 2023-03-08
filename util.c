@@ -110,6 +110,46 @@ pathutil_dirname(const char *path)
 	return dirname(buffer);
 }
 
+/*
+ * Sanitize path.
+ * Compress repeated / and remove trailing ones.
+ */
+char *
+pathutil_sanitize(const char *path)
+{
+	char result[PATH_MAX + 10];
+	char *s;
+
+	if (strlen(path) >= PATH_MAX) {
+		log_error("%s: path too long", __func__);
+		return NULL;
+	}
+	if (*path == '\0')
+		return NULL;
+
+	s = result;
+
+	while (*path) {
+		if (*path == '/') {
+			while (*path == '/')
+				++path;
+			if (*path == '\0')
+				break;
+			*s++ = '/';
+		}
+
+		while (*path && *path != '/')
+			*s++ = *path++;
+
+	}
+	if (s == result)
+		*s++ = '/';
+	*s++ = '\0';
+
+	assert(s < result + sizeof(result));
+	return strdup(result);
+}
+
 bool
 strutil_string_in_list(const char *needle, const char **haystack)
 {
