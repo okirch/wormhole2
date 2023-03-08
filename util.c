@@ -515,16 +515,16 @@ fsutil_tempdir_cleanup(struct fsutil_tempdir *td)
         if (rmdir(td->path) < 0 && errno == EBUSY) {
 		trace("%s is still busy, trying to unmounted", td->path);
 		(void) umount2(td->path, MNT_DETACH);
-	}
 
-        if (rmdir(td->path) < 0) {
-                log_error("Unable to remove temporary mountpoint %s: %m", td->path);
-		sleep(1);
-		if (rmdir(td->path) == 0)
-			return 0;
-		log_error("Still unable to remove: %m");
-		return -1;
-        }
+		if (rmdir(td->path) < 0) {
+			log_error("Unable to remove temporary mountpoint %s: %m", td->path);
+			sleep(1);
+			if (rmdir(td->path) == 0)
+				return 0;
+			log_error("Still unable to remove: %m");
+			return -1;
+		}
+	}
 
 	strutil_drop(&td->path);
 	memset(td, 0, sizeof(*td));
