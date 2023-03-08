@@ -11,7 +11,7 @@ MAN8DIR		= /usr/share/man/man8
 VARLIBDIR	= /var/lib/wormhole
 
 COPT		= -g
-CFLAGS		= -Wall -D_GNU_SOURCE $(COPT)
+CFLAGS		= -Wall -D_GNU_SOURCE $(COPT) -Wformat-truncation=0
 WORMHOLE	= wormhole
 WORMHOLE_SRCS	= wormhole.c
 WORMHOLE_OBJS	= $(WORMHOLE_SRCS:.c=.o)
