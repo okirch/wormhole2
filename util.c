@@ -624,7 +624,7 @@ __fsutil_create_thing(char *path, int mode, int (*creatfn)(const char *path, mod
 	int ret;
 
 	/* trace("%s(%s)", __func__, path); */
-	if (mkdir(path, mode) == 0)
+	if (creatfn(path, mode) == 0)
 		return 0;
 
 	if (errno == EEXIST)
