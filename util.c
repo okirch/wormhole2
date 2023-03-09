@@ -695,6 +695,32 @@ fsutil_makefile(const char *path, int mode)
 	return fsutil_make_thing(path, mode, __create_empty_file);
 }
 
+const char *
+fsutil_makedir2(const char *parent, const char *name)
+{
+        const char *path = __fsutil_concat2(parent, name);
+
+        if (!fsutil_makedirs(path, 0755)) {
+                log_error("Unable to create %s: %m\n", path);
+                return NULL;
+        }
+
+        return path;
+}
+
+const char *
+fsutil_makefile2(const char *parent, const char *name)
+{
+        const char *path = __fsutil_concat2(parent, name);
+
+        if (!fsutil_makefile(path, 0644)) {
+                log_error("Unable to create file %s: %m\n", path);
+                return NULL;
+        }
+
+        return path;
+}
+
 bool
 fsutil_isdir(const char *path)
 {
