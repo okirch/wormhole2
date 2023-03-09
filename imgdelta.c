@@ -478,17 +478,31 @@ update_image_work(struct imgdelta_config *cfg, const char *tpath)
 		char empty[PATH_MAX];
 
 		/* should have been checked in main() */
-		assert(cfg->layers_used.count == 0);
+		assert(cfg->layer_images.count == 0);
 
 		snprintf(empty, sizeof(empty), "%s/empty", tpath);
 		if (mkdir(empty, 0755) < 0) {
 			log_error("canot create empty directory: %m");
 			return 1;
 		}
-		strutil_array_append(&cfg->layers_used, empty);
+		strutil_array_append(&cfg->layer_images, empty);
+	} else {
+		struct wormhole_layer_array resolved = { 0 };
+
+		for (i = 0; i < cfg->layers_used.count; ++i) {
+			const char *layer_name = cfg->layers_used.data[i];
+
+			if (!wormhole_layers_resolve(&resolved, layer_name))
+				return 1;
+		}
+
+		for (i = 0; i < resolved.count; ++i)
+			strutil_array_append(&cfg->layer_images, resolved.data[i]->image_path);
+
+		wormhole_layer_array_destroy(&resolved);
 	}
 
-	lowerspec = strutil_array_join(&cfg->layers_used, ":");
+	lowerspec = strutil_array_join(&cfg->layer_images, ":");
 
 	snprintf(workdir, sizeof(workdir), "%s/work", tpath);
 	if (mkdir(workdir, 0755) < 0) {

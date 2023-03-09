@@ -192,3 +192,42 @@ wormhole_layer_save_config(struct wormhole_layer *layer)
 	return true;
 }
 
+static bool
+__wormhole_layers_resolve(struct wormhole_layer_array *layers, const char *name, unsigned int depth)
+{
+	struct wormhole_layer *layer = NULL;
+	unsigned int i;
+
+	if (depth > 100) {
+		log_error("too many nested layers, possibly a circular reference");
+		return false;
+	}
+
+	if (wormhole_layer_array_find(layers, name))
+		return true;
+
+	layer = wormhole_layer_new(name, NULL, depth);
+
+	if (!wormhole_layer_load_config(layer))
+		goto failed;
+
+	/* Now resolve the lower layers referenced by this one */
+	for (i = 0; i < layer->used.count; ++i) {
+		if (!__wormhole_layers_resolve(layers, layer->used.data[i], depth + 1))
+			goto failed;
+	}
+
+	wormhole_layer_array_append(layers, layer);
+	return true;
+
+failed:
+	if (layer)
+		wormhole_layer_free(layer);
+	return false;
+}
+
+bool
+wormhole_layers_resolve(struct wormhole_layer_array *a, const char *name)
+{
+	return __wormhole_layers_resolve(a, name, 0);
+}

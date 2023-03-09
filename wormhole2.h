@@ -132,4 +132,6 @@ extern void			wormhole_layer_array_append(struct wormhole_layer_array *a, struct
 extern struct wormhole_layer *	wormhole_layer_array_find(struct wormhole_layer_array *a, const char *name);
 extern void			wormhole_layer_array_destroy(struct wormhole_layer_array *a);
 
+extern bool			wormhole_layers_resolve(struct wormhole_layer_array *a, const char *name);
+
 #endif /* WORMHOLE2_H */

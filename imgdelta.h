@@ -32,6 +32,7 @@ struct imgdelta_config {
 	struct wormhole_layer *	layer;
 
 	struct strutil_array	layers_used;
+	struct strutil_array	layer_images;
 
 	struct strutil_array	copydirs;
 	struct strutil_array	excldirs;
