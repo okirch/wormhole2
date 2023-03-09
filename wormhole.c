@@ -747,8 +747,8 @@ __wormhole_context_use_layer(struct wormhole_context *ctx, const char *name, uns
 	}
 
 	/* Now resolve the lower layers referenced by this one */
-	for (i = 0; i < layer->nused; ++i) {
-		if (!__wormhole_context_use_layer(ctx, layer->used[i], depth + 1))
+	for (i = 0; i < layer->used.count; ++i) {
+		if (!__wormhole_context_use_layer(ctx, layer->used.data[i], depth + 1))
 			goto failed;
 	}
 
@@ -1070,7 +1070,7 @@ do_build(struct wormhole_context *ctx)
 		struct wormhole_layer *used = ctx->layers.data[i];
 
 		if (used->depth == 0)
-			layer->used[layer->nused++] = strdup(used->name);
+			strutil_array_append(&layer->used, used->name);
 	}
 
 	if (ctx->manage_rpmdb) {

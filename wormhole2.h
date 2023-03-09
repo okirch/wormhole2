@@ -67,8 +67,7 @@ struct wormhole_layer {
 	/* if 0, referenced by command line */
 	unsigned int		depth;
 
-	unsigned int		nused;
-	char *			used[LOWER_LAYERS_MAX];
+	struct strutil_array	used;
 
 	struct mount_state *	tree;
 };
