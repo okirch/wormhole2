@@ -2,6 +2,7 @@
 #ifndef WORMHOLE2_H
 #define WORMHOLE2_H
 
+#include <stdbool.h>
 #include "util.h"
 
 typedef struct mount_farm mount_farm_t;
@@ -96,11 +97,20 @@ struct wormhole_context {
 	struct fsutil_tempdir	temp;
 };
 
-extern bool		mount_state_discover(const char *mtab,
-				bool (*report_fn)(void *user_data,
-						const char *mount_point,
-						const char *mnt_type,
-						const char *fsname),
-				void *user_data);
+extern bool			mount_state_discover(const char *mtab,
+					bool (*report_fn)(void *user_data,
+							const char *mount_point,
+							const char *mnt_type,
+							const char *fsname),
+					void *user_data);
+extern void			mount_state_free(struct mount_state *state);
+
+extern struct wormhole_layer *	wormhole_layer_new(const char *name, const char *path, unsigned int depth);
+extern void			wormhole_layer_free(struct wormhole_layer *layer);
+extern bool			wormhole_layer_load_config(struct wormhole_layer *layer);
+extern bool			wormhole_layer_save_config(struct wormhole_layer *layer);
+extern void			wormhole_layer_array_append(struct wormhole_layer_array *a, struct wormhole_layer *layer);
+extern struct wormhole_layer *	wormhole_layer_array_find(struct wormhole_layer_array *a, const char *name);
+extern void			wormhole_layer_array_destroy(struct wormhole_layer_array *a);
 
 #endif /* WORMHOLE2_H */

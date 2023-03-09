@@ -19,6 +19,7 @@ LINK		= -L. -lwormhole -lutil
 
 LIB		= libwormhole.a
 LIB_SRCS	= \
+		  layer.c \
 		  mntent2.c \
 		  tracing.c \
 		  util.c
