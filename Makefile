@@ -17,6 +17,10 @@ WORMHOLE_SRCS	= wormhole.c
 WORMHOLE_OBJS	= $(WORMHOLE_SRCS:.c=.o)
 LINK		= -L. -lwormhole -lutil
 
+IMGDELTA	= imgdelta
+IMGDELTA_SRCS	= imgdelta.c
+IMGDELTA_OBJS	= $(IMGDELTA_SRCS:.c=.o)
+
 LIB		= libwormhole.a
 LIB_SRCS	= \
 		  layer.c \
@@ -31,7 +35,7 @@ _MAN1PAGES	= wormhole.1 \
 _MAN5PAGES	= wormhole.conf.5
 _MAN8PAGES	= wormholed.8
 
-all: $(WORMHOLE)
+all: $(WORMHOLE) $(IMGDELTA)
 
 clean:
 	rm -f $(WORMHOLE)
@@ -43,12 +47,8 @@ install: $(WORMHOLE)
 	*) echo "DESTDIR is a relative path, no workie" >&2; exit 2;; \
 	esac
 	install -m 755 -d $(DESTDIR)$(BINDIR)
-	install -m 755 -d $(DESTDIR)$(ETCDIR)
-	install -m 755 -d $(DESTDIR)$(PROFILEDIR)
-	install -m 755 -d $(DESTDIR)$(IMGDIR)
-	install -m 755 -d $(DESTDIR)$(VARLIBDIR)/capability
-	install -m 755 -d $(DESTDIR)$(VARLIBDIR)/command
-	install -m 555 $(WORMHOLE) $(DESTDIR)$(BINDIR)
+	install -m 555 -s $(WORMHOLE) $(DESTDIR)$(BINDIR)
+	install -m 555 -s $(IMGDELTA) $(DESTDIR)$(BINDIR)
 ifneq ($(MAN1PAGES),)
 	install -m 755 -d $(DESTDIR)$(MAN1DIR)
 	install -m 444 $(MAN1PAGES) $(DESTDIR)$(MAN1DIR)
@@ -64,6 +64,9 @@ endif
 
 $(WORMHOLE): $(WORMHOLE_OBJS) $(LIB)
 	$(CC) $(CFLAGS) -o $@ $(WORMHOLE_OBJS) $(LINK)
+
+$(IMGDELTA): $(IMGDELTA_OBJS) $(LIB)
+	$(CC) $(CFLAGS) -o $@ $(IMGDELTA_OBJS) $(LINK)
 
 $(LIB): $(LIB_OBJS)
 	$(AR) crv $@  $(LIB_OBJS)

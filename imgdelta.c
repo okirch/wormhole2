@@ -255,8 +255,8 @@ __image_copy(const char *image_root, const char *src_path, const char *relative_
 	image_path = __concat_path(image_root, relative_src_path);
 	if (dt_type == DT_DIR) {
 		trace2("create dir %s", image_path);
-		if (mkdir(image_path, st->st_mode) < 0 && errno != EEXIST) {
-			log_error("%s: cannot create directory %m", image_path);
+		if (!fsutil_makedirs(image_path, st->st_mode)) {
+			log_error("%s: cannot create directory: %m", image_path);
 			return false;
 		}
 	} else
@@ -632,6 +632,7 @@ read_config(struct imgdelta_config *cfg, const char *filename)
 	FILE *fp = NULL;
 	bool ok = false;
 
+	tracing_set_level(2);
 	trace("Reading config file %s", filename);
 	if (!(fp = fopen(filename, "r"))) {
 		log_error("%s: %m", filename);
@@ -649,7 +650,10 @@ read_config(struct imgdelta_config *cfg, const char *filename)
 
 		if (!(value = strtok(NULL, "")))
 			value = "";
+		else
+			value = __strutil_trim(value);
 
+		trace("%s|%s|\n", kwd, value);
 		if (!strcmp(kwd, "copy")) {
 			if (value[0] != '/') {
 				log_error("%s:%u: argument to copy must be an absolute path", filename, lineno);
