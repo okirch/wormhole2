@@ -61,44 +61,6 @@ concat_path(const char *parent, const char *name)
 	return NULL;
 }
 
-static const char *
-mount_farm_mkdir(const char *parent, const char *name)
-{
-	const char *path = __fsutil_concat2(parent, name);
-
-	if (!fsutil_makedirs(path, 0755)) {
-		log_error("Unable to create %s: %m\n", path);
-		return NULL;
-	}
-
-	return path;
-}
-
-static const char *
-mount_farm_mkreg(const char *parent, const char *name)
-{
-	const char *path = __fsutil_concat2(parent, name);
-
-	if (!fsutil_makefile(path, 0644)) {
-		log_error("Unable to create file %s: %m\n", path);
-		return NULL;
-	}
-
-	return path;
-}
-
-static bool
-mount_farm_set_dir(char **path_p, const char *parent, const char *name)
-{
-	const char *path;
-
-	if (!(path = mount_farm_mkdir(parent, name)))
-		return false;
-
-	strutil_set(path_p, path);
-	return true;
-}
-
 static struct mount_bind *
 mount_bind_new(struct mount_farm *farm, const char *src, const char *dst)
 {
