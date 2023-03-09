@@ -184,9 +184,8 @@ mount_leaf_is_below_mountpoint(const struct mount_leaf *leaf)
 	return false;
 }
 
-/* should be renamed to mount_leaf_lookup */
 static struct mount_leaf *
-mount_farm_lookup(struct mount_leaf *parent, const char *relative_path, bool create)
+mount_leaf_lookup(struct mount_leaf *parent, const char *relative_path, bool create)
 {
 	struct pathutil_parser path_parser;
 	struct mount_leaf *leaf = NULL, **pos;
@@ -431,7 +430,7 @@ mount_state_free(struct mount_state *state)
 struct mount_leaf *
 mount_state_create_leaf(struct mount_state *state, const char *relative_path)
 {
-	return mount_farm_lookup(state->root, relative_path, true);
+	return mount_leaf_lookup(state->root, relative_path, true);
 }
 
 static bool
@@ -467,7 +466,7 @@ mount_state_make_relative(struct mount_state *state, const char *common_root)
 {
 	struct mount_leaf *layer_root;
 
-	layer_root = mount_farm_lookup(state->root, common_root, false);
+	layer_root = mount_leaf_lookup(state->root, common_root, false);
 	if (!layer_root)
 		return false;
 
@@ -561,7 +560,7 @@ mount_farm_set_upper_base(struct mount_farm *farm, const char *upper_base)
 struct mount_leaf *
 mount_farm_find_leaf(struct mount_farm *farm, const char *relative_path)
 {
-	return mount_farm_lookup(farm->root, relative_path, false);
+	return mount_leaf_lookup(farm->root, relative_path, false);
 }
 
 bool
@@ -569,7 +568,7 @@ mount_farm_has_mount_for(struct mount_farm *farm, const char *path)
 {
 	struct mount_leaf *leaf;
 
-	if (!(leaf = mount_farm_lookup(farm->root, path, false)))
+	if (!(leaf = mount_leaf_lookup(farm->root, path, false)))
 		return false;
 
 	return mount_leaf_is_mountpoint(leaf);
@@ -580,7 +579,7 @@ mount_farm_add_system_dir(struct mount_farm *farm, const char *system_path)
 {
 	struct mount_leaf *leaf;
 
-	if (!(leaf = mount_farm_lookup(farm->root, system_path, true)))
+	if (!(leaf = mount_leaf_lookup(farm->root, system_path, true)))
 		return NULL;
 
 	if (!mount_leaf_set_fstype(leaf, "overlay", farm))
@@ -597,7 +596,7 @@ mount_farm_add_virtual_mount(struct mount_farm *farm, const char *system_path, c
 {
 	struct mount_leaf *leaf;
 
-	if (!(leaf = mount_farm_lookup(farm->root, system_path, true)))
+	if (!(leaf = mount_leaf_lookup(farm->root, system_path, true)))
 		return NULL;
 
 	if (!mount_leaf_set_fstype(leaf, fstype, farm))
@@ -759,9 +758,9 @@ __mount_farm_discover_callback(void *closure, const char *mount_point,
 		return true;
 	}
 
-	leaf = mount_farm_lookup(state->root, mount_point, true);
+	leaf = mount_leaf_lookup(state->root, mount_point, true);
 	if (leaf == NULL) {
-		log_error("mount_farm_lookup(%s) failed\n", mount_point);
+		log_error("mount_leaf_lookup(%s) failed\n", mount_point);
 		return false;
 	}
 
@@ -772,7 +771,7 @@ __mount_farm_discover_callback(void *closure, const char *mount_point,
 static struct mount_leaf *
 mount_state_find(struct mount_state *state, const char *path)
 {
-	return mount_farm_lookup(state->root, path, false);
+	return mount_leaf_lookup(state->root, path, false);
 }
 
 static bool
@@ -818,7 +817,7 @@ mount_farm_discover_system_dir_with_submounts(struct mount_farm *farm, struct mo
 				goto next;
 			}
 
-			child = mount_farm_lookup(to_be_exported, d->d_name, false);
+			child = mount_leaf_lookup(to_be_exported, d->d_name, false);
 			if (child == NULL || child->children == NULL) {
 				/* There is no mount point for this directory, and no mount point below it.
 				 * Set up an overlay mount for this location.
@@ -878,7 +877,7 @@ __mount_farm_apply_layer(struct mount_farm *farm, struct mount_leaf *farm_dir, s
 	bool okay = true;
 
 	for (layer_child = layer_dir->children; layer_child; layer_child = layer_child->next) {
-		farm_child = mount_farm_lookup(farm_dir, layer_child->name, false);
+		farm_child = mount_leaf_lookup(farm_dir, layer_child->name, false);
 		if (farm_child == NULL) {
 			log_error("Image provides %s in non-canonical location", layer_child->relative_path);
 			return false;
