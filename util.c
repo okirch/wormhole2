@@ -794,7 +794,6 @@ dev_ino_array_append(struct dev_ino_array *a, dev_t dev, ino_t ino)
 {
 	if ((a->count % 64) == 0)
 		a->data = realloc(a->data, (a->count + 64) * sizeof(a->data[0]));
-	trace("%s: %lu %lu", __func__, (long) dev, (long) ino);
 	a->data[a->count].dev = dev;
 	a->data[a->count].ino = ino;
 	a->count++;
@@ -1810,6 +1809,24 @@ strutil_array_join(const struct strutil_array *a, const char *sepa)
 	*s++ = '\0';
 
 	return result;
+}
+
+/*
+ * Sort string array
+ */
+static int
+__strutil_array_member_cmp(const void *pa, const void *pb)
+{
+	const char *a = *(const char **) pa;
+	const char *b = *(const char **) pb;
+
+	return strcmp(a, b);
+}
+
+void
+strutil_array_sort(struct strutil_array *a)
+{
+	qsort(a->data, a->count, sizeof(a->data[0]), __strutil_array_member_cmp);
 }
 
 void

@@ -167,6 +167,7 @@ extern void			strutil_array_init(struct strutil_array *);
 extern void			strutil_array_append(struct strutil_array *, const char *);
 extern bool			strutil_array_contains(const struct strutil_array *, const char *);
 extern void			strutil_array_append_array(struct strutil_array *, const struct strutil_array *);
+extern void			strutil_array_sort(struct strutil_array *);
 extern void			strutil_array_destroy(struct strutil_array *);
 extern char *			strutil_array_join(const struct strutil_array *, const char *sepa);
 

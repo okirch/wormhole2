@@ -34,6 +34,7 @@
 #include <assert.h>
 
 #include "imgdelta.h"
+#include "wormhole2.h"
 #include "tracing.h"
 
 static bool		can_chown = false;
@@ -345,6 +346,9 @@ copy_recursively(const char *src_path, const char *dst_path)
         struct fsutil_ftw_cursor cursor;
 	bool ok = true;
 
+	if (!fsutil_makedirs(dst_path, 0755))
+		return false;
+
         ctx = fsutil_ftw_open("/", 0, src_path);
 	if (mkdir(dst_path, 0755) < 0 && errno != EEXIST) {
 		log_error("%s: cannot create directory: %m", dst_path);
@@ -530,8 +534,8 @@ update_image_work(struct imgdelta_config *cfg, const char *tpath)
 			return rv;
 	}
 
-	trace("=== Recursively copying image delta to %s ===", cfg->layer_root);
-	if (!copy_recursively(upperdir, cfg->layer_root))
+	trace("=== Recursively copying image delta to %s ===", cfg->layer->image_path);
+	if (!copy_recursively(upperdir, cfg->layer->image_path))
 		return 1;
 
 	return 0;
@@ -566,40 +570,56 @@ update_image(struct imgdelta_config *cfg)
 	return rv;
 }
 
+static bool
+__update_layer_config(struct wormhole_layer *layer, struct imgdelta_config *cfg)
+{
+	struct strutil_array work = { 0 };
+	unsigned int i;
+
+	layer->is_root = cfg->create_base_layer;
+
+	strutil_array_append_array(&work, &cfg->copydirs);
+	strutil_array_append_array(&work, &cfg->makedirs);
+	strutil_array_sort(&work);
+
+	for (i = 0; i < work.count; ++i) {
+		const char *dir_path = work.data[i];
+		unsigned int len;
+
+		strutil_array_append(&layer->directories, dir_path);
+
+		len = strlen(dir_path);
+		while (i + 1 < work.count) {
+			const char *next_dir = work.data[i + 1];
+
+			if (strncmp(dir_path, next_dir, len) || next_dir[len] != '/')
+				break;
+
+			/* Skip over the next entry as it is below the one we just copied */
+			i += 1;
+		}
+	}
+
+	if (!cfg->create_base_layer)
+		strutil_array_append_array(&layer->used, &cfg->layers_used);
+
+	strutil_array_destroy(&work);
+	return true;
+}
+
 static int
 write_layer_config(struct imgdelta_config *cfg)
 {
-	FILE *fp;
-	unsigned int i;
-
-	if (!(fp = fopen(cfg->layer_config, "w"))) {
-		log_error("Cannot create %s: %m", cfg->layer_config);
+	__update_layer_config(cfg->layer, cfg);
+	if (!wormhole_layer_save_config(cfg->layer))
 		return 1;
-	}
-
-	if (cfg->create_base_layer)
-		fprintf(fp, "is-root=true\n");
-
-	for (i = 0; i < cfg->layers_used.count; ++i)
-		fprintf(fp, "use-layer=%s\n", cfg->layers_used.data[i]);
-
-	for (i = 0; i < cfg->copydirs.count; ++i)
-		fprintf(fp, "mount=%s\n", cfg->copydirs.data[i]);
-
-	fclose(fp);
 
 	return 0;
 }
 
-enum {
-	OPT_WRITE_LAYER_CONFIG = 1000,
-};
-
 static struct option	long_options[] = {
 	{ "create-base-layer",
 			no_argument,		NULL,	'B'		},
-	{ "write-layer-config",
-			required_argument,	NULL,	OPT_WRITE_LAYER_CONFIG },
 	{ "config",	required_argument,	NULL,	'c'		},
 	{ "copy",	required_argument,	NULL,	'C'		},
 	{ "exclude",	required_argument,	NULL,	'X'		},
@@ -618,7 +638,6 @@ read_config(struct imgdelta_config *cfg, const char *filename)
 	FILE *fp = NULL;
 	bool ok = false;
 
-	tracing_set_level(2);
 	trace("Reading config file %s", filename);
 	if (!(fp = fopen(filename, "r"))) {
 		log_error("%s: %m", filename);
@@ -639,7 +658,6 @@ read_config(struct imgdelta_config *cfg, const char *filename)
 		else
 			value = __strutil_trim(value);
 
-		trace("%s|%s|\n", kwd, value);
 		if (!strcmp(kwd, "copy")) {
 			if (value[0] != '/') {
 				log_error("%s:%u: argument to copy must be an absolute path", filename, lineno);
@@ -681,6 +699,7 @@ int
 main(int argc, char **argv)
 {
 	struct imgdelta_config config = { 0 };
+	char *layer_path;
 	int c, rv;
 
 	if (fsutil_exists("/etc/imgdelta.conf") && !read_config(&config, "/etc/imgdelta.conf"))
@@ -717,10 +736,6 @@ main(int argc, char **argv)
 			config.force = true;
 			break;
 
-		case OPT_WRITE_LAYER_CONFIG:
-			strutil_set(&config.layer_config, optarg);
-			break;
-
 		default:
 			log_error("Unknown option\n");
 			return 1;
@@ -734,7 +749,10 @@ main(int argc, char **argv)
 		log_error("Expecting exactly one argument: output-layer");
 		return 1;
 	}
-	config.layer_root = pathutil_sanitize(argv[optind++]);
+
+	layer_path = pathutil_sanitize(argv[optind++]);
+
+	config.layer = wormhole_layer_new(basename(layer_path), layer_path, 0);
 
 	if (config.copydirs.count == 0) {
 		const char **dirs = default_copydirs, *path;
@@ -747,8 +765,9 @@ main(int argc, char **argv)
 		unsigned int i;
 
 		trace("=== Configuration ===");
-		trace("Output layer: %s", config.layer_root);
-		trace("Layers used:  %s", config.layer_root);
+		trace("Output layer: %s", config.layer->name);
+		trace("Layer path:   %s", config.layer->path);
+		trace("Image path:   %s", config.layer->image_path);
 		if (config.create_base_layer)
 			trace("  (creating base layer)");
 		else
@@ -761,8 +780,6 @@ main(int argc, char **argv)
 			trace("Excluded");
 		for (i = 0; i < config.excldirs.count; ++i)
 			trace("  %s", config.excldirs.data[i]);
-		if (config.layer_config)
-			trace("Write config: %s", config.layer_config);
 	}
 
 	if (config.layers_used.count == 0 && !config.create_base_layer) {
@@ -774,12 +791,12 @@ main(int argc, char **argv)
 		return 1;
 	}
 
-	if (fsutil_exists(config.layer_root)) {
+	if (fsutil_exists(config.layer->path)) {
 		if (!config.force) {
-			log_error("layer root \"%s\" already exists, timidly bailing out", config.layer_root);
+			log_error("layer root \"%s\" already exists, timidly bailing out", config.layer->path);
 			return 1;
 		}
-		if (!fsutil_remove_recursively(config.layer_root))
+		if (!fsutil_remove_recursively(config.layer->path))
 			return 1;
 	}
 
@@ -790,7 +807,7 @@ main(int argc, char **argv)
 	/* Traverse the entire filesystem and modify the image accordingly. */
 	rv = update_image(&config);
 
-	if (rv == 0 && config.layer_config)
+	if (rv == 0)
 		rv = write_layer_config(&config);
 
 	return rv;
