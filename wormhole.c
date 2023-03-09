@@ -51,24 +51,10 @@ __mount_bind(const char *src, const char *dst, int extra_flags)
 	return true;
 }
 
-static const char *
-__concat_path(const char *parent, const char *name)
-{
-	static char path[PATH_MAX];
-
-	if (!strcmp(parent, "/"))
-		parent = "";
-
-	while (*name == '/')
-		++name;
-	snprintf(path, sizeof(path), "%s/%s", parent, name);
-	return path;
-}
-
 static char *
 concat_path(const char *parent, const char *name)
 {
-	const char *path = __concat_path(parent, name);
+	const char *path = __fsutil_concat2(parent, name);
 
 	if (path)
 		return strdup(path);
@@ -78,7 +64,7 @@ concat_path(const char *parent, const char *name)
 static const char *
 mount_farm_mkdir(const char *parent, const char *name)
 {
-	const char *path = __concat_path(parent, name);
+	const char *path = __fsutil_concat2(parent, name);
 
 	if (!fsutil_makedirs(path, 0755)) {
 		log_error("Unable to create %s: %m\n", path);
@@ -91,7 +77,7 @@ mount_farm_mkdir(const char *parent, const char *name)
 static const char *
 mount_farm_mkreg(const char *parent, const char *name)
 {
-	const char *path = __concat_path(parent, name);
+	const char *path = __fsutil_concat2(parent, name);
 
 	if (!fsutil_makefile(path, 0644)) {
 		log_error("Unable to create file %s: %m\n", path);
@@ -708,7 +694,7 @@ __mount_layer_discover_callback(const char *dir_path, const struct dirent *d, in
 	}
 
 	if (d->d_type == DT_DIR) {
-		const char *full_path = __concat_path(dir_path, d->d_name);
+		const char *full_path = __fsutil_concat2(dir_path, d->d_name);
 		struct mount_leaf *leaf;
 
 		if (!(leaf = mount_state_create_leaf(state, full_path))) {

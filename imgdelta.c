@@ -57,20 +57,6 @@ __mount_bind(const char *src, const char *dst, int extra_flags)
 	return true;
 }
 
-static const char *
-__concat_path(const char *parent, const char *name)
-{
-	static char path[PATH_MAX];
-
-	if (!strcmp(parent, "/"))
-		parent = "";
-
-	while (*name == '/')
-		++name;
-	snprintf(path, sizeof(path), "%s/%s", parent, name);
-	return path;
-}
-
 static const struct stat *
 do_stat(const char *path, struct stat *stb)
 {
@@ -252,7 +238,7 @@ __image_copy(const char *image_root, const char *src_path, const char *relative_
 	if (st == NULL && !(st = do_stat(src_path, &_stb)))
 		return false;
 
-	image_path = __concat_path(image_root, relative_src_path);
+	image_path = __fsutil_concat2(image_root, relative_src_path);
 	if (dt_type == DT_DIR) {
 		trace2("create dir %s", image_path);
 		if (!fsutil_makedirs(image_path, st->st_mode)) {
@@ -306,7 +292,7 @@ image_compare_copy(const char *image_root, struct fsutil_ftw_cursor *cursor)
 	if (!do_stat(cursor->path, &system_stb))
 		return false;
 
-	image_path = __concat_path(image_root, cursor->path);
+	image_path = __fsutil_concat2(image_root, cursor->path);
 	if (do_stat(image_path, &image_stb)
 	 && !__attrs_changed(cursor->path, &system_stb, &image_stb)) {
 		trace3("%s: unchanged", cursor->path);
@@ -536,7 +522,7 @@ update_image_work(struct imgdelta_config *cfg, const char *tpath)
 		for (i = 0; i < cfg->makedirs.count; ++i) {
 			const char *dir_path = cfg->makedirs.data[i];
 
-			if (!fsutil_makedirs(__concat_path(overlay, dir_path), 0755))
+			if (!fsutil_makedirs(__fsutil_concat2(overlay, dir_path), 0755))
 				rv = 1;
 		}
 

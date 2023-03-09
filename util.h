@@ -136,6 +136,20 @@ extern bool			fsutil_make_fs_private(const char *dir, bool maybe_in_chroot);
 extern bool			fsutil_same_file(const char *path1, const char *path2);
 extern bool			fsutil_dir_is_mountpoint(const char *path);
 
+static inline const char *
+__fsutil_concat2(const char *parent, const char *name)
+{
+        static char path[PATH_MAX];
+
+        if (!strcmp(parent, "/"))
+                parent = "";
+
+        while (*name == '/')
+                ++name;
+        snprintf(path, sizeof(path), "%s/%s", parent, name);
+        return path;
+}
+
 extern bool			strutil_equal(const char *s1, const char *s2);
 extern bool			strutil_string_in_list(const char *needle, const char **haystack);
 extern void			strutil_set(char **var, const char *value);
