@@ -536,11 +536,10 @@ mount_farm_set_upper_base(struct mount_farm *farm, const char *upper_base)
 		log_warning("Things may or may not work.");
 	}
 
-	if (!mount_farm_set_dir(&farm->upper_base, upper_base, "image")
-	 || !mount_farm_set_dir(&farm->work_base, upper_base, "work"))
-		return false;
+	strutil_set(&farm->upper_base, fsutil_makedir2(upper_base, "image"));
+	strutil_set(&farm->work_base, fsutil_makedir2(upper_base, "work"));
 
-	return true;
+	return farm->upper_base && farm->work_base;
 }
 
 struct mount_leaf *
@@ -657,16 +656,16 @@ mount_farm_mount_into(struct mount_farm *farm, const char *src, const char *dst)
 
 	/* Create the node on which we later bind the file */
 	if (fsutil_isdir(src))
-		loc = mount_farm_mkdir(farm->upper_base, dst);
+		loc = fsutil_makedir2(farm->upper_base, dst);
 	else
-		loc = mount_farm_mkreg(farm->upper_base, dst);
+		loc = fsutil_makefile2(farm->upper_base, dst);
 	if (loc == NULL)
 		return false;
 
 	if (chown(loc, 0, 0))
 		log_warning("Unable to chown %s: %m", loc);
 
-	mount = mount_farm_mkdir(farm->chroot, dst);
+	mount = fsutil_makedir2(farm->chroot, dst);
 
 	trace("Setting up %s with binding to %s", mount, src);
 	return mount_farm_add_bind(farm, src, mount) != NULL;
@@ -1091,7 +1090,10 @@ wormhole_context_set_build(struct wormhole_context *ctx, const char *name, const
 
 	if (build_root)
 		strutil_set(&ctx->build_root, build_root);
-	else if (!mount_farm_set_dir(&ctx->build_root, get_current_dir_name(), "wormhole-build"))
+	else
+		strutil_set(&ctx->build_root, fsutil_makedir2(get_current_dir_name(), "wormhole-build"));
+
+	if (ctx->build_root == NULL)
 		log_fatal("Cannot set build root to $PWD/wormhole-build");
 }
 
