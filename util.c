@@ -39,6 +39,14 @@
 #include "tracing.h"
 #include "util.h"
 
+struct dev_ino_array {
+	unsigned int		count;
+	struct {
+		dev_t		dev;
+		ino_t		ino;
+	} *data;
+};
+
 
 const char *
 procutil_concat_argv(int argc, char **argv)
@@ -751,6 +759,42 @@ fsutil_dir_is_empty(const char *path)
 	return empty;
 }
 
+/*
+ * Array of dev/inode number
+ */
+void
+dev_ino_array_append(struct dev_ino_array *a, dev_t dev, ino_t ino)
+{
+	if ((a->count % 64) == 0)
+		a->data = realloc(a->data, (a->count + 64) * sizeof(a->data[0]));
+	trace("%s: %lu %lu", __func__, (long) dev, (long) ino);
+	a->data[a->count].dev = dev;
+	a->data[a->count].ino = ino;
+	a->count++;
+}
+
+void
+dev_ino_array_destroy(struct dev_ino_array *a)
+{
+	if (a->data)
+		free(a->data);
+	memset(a, 0, sizeof(*a));
+	free(a);
+}
+
+bool
+dev_ino_array_contains(const struct dev_ino_array *a, dev_t dev, ino_t ino)
+{
+	unsigned int i;
+
+	for (i = 0; i < a->count; ++i) {
+		if (a->data[i].dev == dev && a->data[i].ino == ino)
+			return true;
+	}
+	return false;
+}
+
+
 typedef int	__fsutil_ftw_internal_cb_fn_t(const char *dir_path, int dir_fd, const struct dirent *d, int flags, void *closure);
 
 static bool
@@ -856,55 +900,471 @@ __fsutil_ftw(const char *dir_path, int dirfd, struct stat *dir_stat, __fsutil_ft
 	return ok;
 }
 
-struct fsutil_ftw_user_context {
-	fsutil_ftw_cb_fn_t *	user_callback;
-	void *			user_closure;
+struct fsutil_ftw_level {
+	struct fsutil_ftw_level *parent;
+	char			path[PATH_MAX];
+	struct stat		dir_stat;
+	int			dir_fd;
+	DIR *			dir_handle;
+
+	const struct dirent *	saved_dirent;
+
+	struct fsutil_ftw_sorted_entries {
+		unsigned int	pos;
+		unsigned int	count;
+		struct dirent **entries;
+	} *sorted;
 };
 
-static int
-__fsutil_ftw_callback(const char *dir_path, int dir_fd, const struct dirent *d, int flags, void *closure)
-{
-	struct fsutil_ftw_user_context *ctx = closure;
+struct fsutil_ftw_ctx {
+	const char *		top_dir;
+	unsigned int		top_dir_len;
 
-	return ctx->user_callback(dir_path, d, flags, ctx->user_closure);
+	fsutil_ftw_cb_fn_t *	user_callback;
+	void *			user_closure;
+
+	int			flags;
+	bool			callback_before;
+	bool			callback_after;
+
+	dev_t			fsdev;
+	struct dev_ino_array	exclude;
+
+	struct fsutil_ftw_level	*current;
+};
+
+static struct fsutil_ftw_level *
+fsutil_ftw_level_new(struct fsutil_ftw_level *parent, const char *name)
+{
+	const char *parent_path = parent->path;
+	struct fsutil_ftw_level *child;
+	struct stat child_stb;
+
+	if (fstatat(parent->dir_fd, name, &child_stb, AT_NO_AUTOMOUNT | AT_SYMLINK_NOFOLLOW) < 0) {
+		log_error("can't stat %s/%s: %m", parent->path, name);
+		return NULL;
+	}
+
+	child = calloc(1, sizeof(*child));
+	snprintf(child->path, sizeof(child->path), "%s/%s", parent_path, name);
+	child->dir_stat = child_stb;
+	child->dir_fd = -1;
+
+	return child;
+}
+
+static struct fsutil_ftw_level *
+fsutil_ftw_level_new_top(const char *path)
+{
+	struct fsutil_ftw_level *dir;
+	struct stat dir_stb;
+
+	if (stat(path, &dir_stb) < 0) {
+		log_error("can't stat %s: %m", path);
+		return NULL;
+	}
+
+	dir = calloc(1, sizeof(*dir));
+	strncpy(dir->path, path, sizeof(dir->path));
+	dir->dir_stat = dir_stb;
+	dir->dir_fd = -1;
+
+	return dir;
+}
+
+static void
+fsutil_ftw_level_free(struct fsutil_ftw_level *dir)
+{
+	if (dir->dir_fd >= 0) {
+		close(dir->dir_fd);
+		dir->dir_fd = -1;
+	}
+
+	if (dir->dir_handle) {
+		closedir(dir->dir_handle);
+		dir->dir_handle = NULL;
+	}
+
+	if (dir->sorted) {
+		struct fsutil_ftw_sorted_entries *sorted = dir->sorted;
+		unsigned int i;
+
+		for (i = 0; i < sorted->count; ++i)
+			free(sorted->entries[i]);
+		free(sorted->entries);
+		sorted->entries = NULL;
+		sorted->count = 0;
+
+		dir->sorted = NULL;
+		free(sorted);
+	}
+
+	free(dir);
+}
+
+static struct fsutil_ftw_level *
+fsutil_ftw_ctx_push(struct fsutil_ftw_ctx *ctx, struct fsutil_ftw_level *child)
+{
+	if (child != NULL) {
+		child->parent = ctx->current;
+		ctx->current = child;
+	}
+	return child;
+}
+
+static struct fsutil_ftw_level *
+fsutil_ftw_ctx_pop(struct fsutil_ftw_ctx *ctx)
+{
+	struct fsutil_ftw_level *child;
+
+	if ((child = ctx->current) != NULL) {
+		ctx->current = child->parent;
+		child->parent = NULL;
+	}
+	return child;
+}
+
+void
+fsutil_ftw_ctx_free(struct fsutil_ftw_ctx *ctx)
+{
+	while (fsutil_ftw_ctx_pop(ctx))
+		;
+
+	free(ctx);
+}
+
+int
+fsutil_ftw_descend(struct fsutil_ftw_ctx *ctx, const struct dirent *d)
+{
+	struct fsutil_ftw_level *parent = ctx->current;
+	const char *name = d->d_name;
+	struct fsutil_ftw_level *child;
+	int childfd;
+	int rv = FTW_ERROR;
+
+	if (!(child = fsutil_ftw_level_new(parent, name)))
+		return FTW_ERROR;
+	child->saved_dirent = d;
+
+	if (ctx->flags & FSUTIL_FTW_ONE_FILESYSTEM) {
+		if (child->dir_stat.st_dev != ctx->fsdev) {
+			trace("Skipping %s: different filesystem", child->path);
+			goto skipped;
+		}
+	}
+
+	childfd = openat(parent->dir_fd, name, O_RDONLY|O_NOCTTY|O_NONBLOCK|O_NOFOLLOW|O_DIRECTORY);
+	if (childfd < 0 && errno == EACCES && (ctx->flags & FSUTIL_FTW_OVERRIDE_OPEN_ERROR)) {
+		(void) fchmodat(parent->dir_fd, name, 0700, 0);
+		childfd = openat(parent->dir_fd, name, O_RDONLY|O_NOCTTY|O_NONBLOCK|O_NOFOLLOW|O_DIRECTORY);
+	}
+	if (childfd < 0) {
+		if (!(ctx->flags & FSUTIL_FTW_IGNORE_OPEN_ERROR)) {
+			log_error("can't open %s: %m", child->path);
+			goto error;
+		}
+		goto skipped;
+	}
+
+	child->dir_fd = childfd;
+
+	if (!(child->dir_handle = fdopendir(dup(childfd)))) {
+		log_error("cannot dup directory fd: %m");
+		goto error;
+	}
+
+	fsutil_ftw_ctx_push(ctx, child);
+	return FTW_CONTINUE;
+
+return_no_descend:
+	if (child)
+		fsutil_ftw_level_free(child);
+	return rv;
+
+error:
+	rv = FTW_ERROR;
+	goto return_no_descend;
+
+skipped:
+	rv = FTW_SKIP;
+	goto return_no_descend;
+}
+
+static const struct dirent *
+__fsutil_ftw_next(struct fsutil_ftw_level *dir)
+{
+	struct fsutil_ftw_sorted_entries *sorted;
+
+	if (dir == NULL)
+		return NULL;
+
+	if ((sorted = dir->sorted) != NULL) {
+		if (sorted->pos >= sorted->count)
+			return NULL;
+		return sorted->entries[sorted->pos++];
+	}
+
+	if (dir->dir_handle == NULL)
+		return NULL;
+
+	return readdir(dir->dir_handle);
+}
+
+bool
+fsutil_ftw_return(struct fsutil_ftw_ctx *ctx)
+{
+	struct fsutil_ftw_level *child;
+
+	if (!(child = fsutil_ftw_ctx_pop(ctx)))
+		return false;
+
+	fsutil_ftw_level_free(child);
+	return true;
+}
+
+static int
+__fsutil_dirent_compare(const void *pa, const void *pb)
+{
+	const struct dirent *da = *(struct dirent **) pa;
+	const struct dirent *db = *(struct dirent **) pb;
+
+	return strcmp(da->d_name, db->d_name);
+}
+
+static bool
+fsutil_ftw_sort(struct fsutil_ftw_level *dir)
+{
+	struct fsutil_ftw_sorted_entries *sorted;
+	const struct dirent *d;
+
+	sorted = calloc(0, sizeof(*sorted));
+
+	while ((d = __fsutil_ftw_next(dir)) != NULL) {
+		struct dirent *cloned_dirent;
+
+		if ((sorted->count % 32) == 0) {
+			sorted->entries = realloc(sorted->entries, (sorted->count + 32) * sizeof(sorted->entries[0]));
+		}
+
+		cloned_dirent = malloc(sizeof(*d));
+		*cloned_dirent = *d;
+		sorted->entries[sorted->count++] = cloned_dirent;
+	}
+
+	qsort(sorted->entries, sorted->count, sizeof(sorted->entries[0]), __fsutil_dirent_compare);
+	dir->sorted = sorted;
+	return true;
+}
+
+bool
+fsutil_ftw_skip(struct fsutil_ftw_ctx *ctx, const struct fsutil_ftw_cursor *cursor)
+{
+	struct fsutil_ftw_level *dir = ctx->current;
+
+	if (!strcmp(cursor->path, dir->path))
+		fsutil_ftw_return(ctx);
+	return false;
+}
+
+const struct dirent *
+fsutil_ftw_next(struct fsutil_ftw_ctx *ctx, struct fsutil_ftw_cursor *cursor)
+{
+	const struct dirent *d = NULL;
+	int rv = FTW_CONTINUE;
+
+	if (cursor)
+		cursor->d = NULL;
+
+	while (rv == FTW_CONTINUE || rv == FTW_SKIP) {
+		struct fsutil_ftw_level *dir = ctx->current;
+
+		if ((d = __fsutil_ftw_next(dir)) == NULL) {
+			if (ctx->callback_after && dir->saved_dirent) {
+				d = dir->saved_dirent;
+				dir->saved_dirent = NULL;
+			}
+
+			if (!fsutil_ftw_return(ctx))
+				return NULL;
+			continue;
+		}
+
+		if (d->d_type == DT_DIR) {
+			if (!strcmp(d->d_name, ".") || !strcmp(d->d_name, ".."))
+				continue;
+
+			rv = fsutil_ftw_descend(ctx, d);
+			if (rv == FTW_SKIP)
+				continue;
+
+			if (ctx->flags & FSUTIL_FTW_SORTED)
+				fsutil_ftw_sort(ctx->current);
+		}
+
+		if (rv == FTW_CONTINUE && ctx->callback_before) {
+			if (cursor) {
+				snprintf(cursor->path, sizeof(cursor->path), "%s/%s", dir->path, d->d_name);
+				cursor->d = d;
+
+				if (ctx->top_dir) {
+					assert(!strncmp(cursor->path, ctx->top_dir, ctx->top_dir_len) && cursor->path[ctx->top_dir_len] == '/');
+					cursor->relative_path = cursor->path + ctx->top_dir_len;
+				} else {
+					cursor->relative_path = cursor->path;
+				}
+
+				if (ctx->flags & FSUTIL_FTW_NEED_STAT) {
+					if (lstat(cursor->path, &cursor->_st) < 0) {
+						log_error("funny, %s disappeared", cursor->path);
+						continue;
+					}
+					cursor->st = &cursor->_st;
+
+					if (dev_ino_array_contains(&ctx->exclude, cursor->_st.st_dev, cursor->_st.st_ino)) {
+						trace2("%s: skipped", cursor->path);
+						fsutil_ftw_skip(ctx, cursor);
+						continue;
+					}
+				}
+			}
+			return d;
+		}
+	}
+
+	return NULL;
+}
+
+struct fsutil_ftw_ctx *
+fsutil_ftw_open(const char *dir_path, int flags, const char *root_dir)
+{
+	struct fsutil_ftw_ctx *ctx;
+	struct fsutil_ftw_level *dir;
+	char full_path[PATH_MAX];
+
+	if (root_dir) {
+		while (*dir_path == '/')
+			++dir_path;
+		snprintf(full_path, sizeof(full_path), "%s/%s", root_dir, dir_path);
+		dir_path = full_path;
+	}
+
+	trace2("%s(%s)", __func__, dir_path);
+	ctx = calloc(1, sizeof(*ctx));
+	ctx->flags = flags;
+
+	dir = fsutil_ftw_level_new_top(dir_path);
+	if (dir == NULL)
+		goto failed;
+
+	if (root_dir) {
+		unsigned int len;
+
+		len = strlen(root_dir);
+		while (len && root_dir[len - 1] == '/')
+			--len;
+
+		if (len == 1 && root_dir[0] == '/') {
+			/* root_dir is really the fs root */
+		} else {
+			ctx->top_dir = root_dir;
+			ctx->top_dir_len = len;
+		}
+	}
+
+	fsutil_ftw_ctx_push(ctx, dir);
+	ctx->fsdev = dir->dir_stat.st_dev;
+
+	dir->dir_fd = open(dir_path, O_RDONLY|O_NOCTTY|O_NONBLOCK|O_NOFOLLOW|O_DIRECTORY);
+	if (dir->dir_fd >= 0)
+		dir->dir_handle = fdopendir(dup(dir->dir_fd));
+
+	if (dir == NULL || dir->dir_handle == NULL) {
+		if (!(flags & FSUTIL_FTW_IGNORE_OPEN_ERROR)) {
+			log_error("unable to open dir %s: %m", dir_path);
+			goto failed;
+		}
+	}
+
+	if (ctx->flags & FSUTIL_FTW_SORTED)
+		fsutil_ftw_sort(dir);
+
+	if (flags & FSUTIL_FTW_DEPTH_FIRST)
+		ctx->callback_after = true;
+	else if (flags & FSUTIL_FTW_PRE_POST_CALLBACK)
+		ctx->callback_after = ctx->callback_before = true;
+	else
+		ctx->callback_before = true;
+	return ctx;
+
+failed:
+	if (ctx)
+		fsutil_ftw_ctx_free(ctx);
+	return NULL;
+}
+
+bool
+fsutil_ftw_exclude(struct fsutil_ftw_ctx *ctx, const char *path)
+{
+	struct stat stb;
+
+	if (lstat(path, &stb) < 0)
+		return false;
+
+	dev_ino_array_append(&ctx->exclude, stb.st_dev, stb.st_ino);
+	ctx->flags |= FSUTIL_FTW_NEED_STAT;
+	return true;
+}
+
+static int
+__fsutil_ftw_do_callback(struct fsutil_ftw_ctx *ctx, const struct dirent *d, int extra_flags)
+{
+	struct fsutil_ftw_level *dir = ctx->current;
+
+	return ctx->user_callback(dir->path, d, ctx->flags | extra_flags, ctx->user_closure);
 }
 
 bool
 fsutil_ftw(const char *dir_path, fsutil_ftw_cb_fn_t *callback, void *closure, int flags)
 {
-	struct fsutil_ftw_user_context ctx;
-	struct stat stb, *dir_stat = NULL;
-	int dirfd;
-	bool ok = true;
+	struct fsutil_ftw_ctx *ctx;
+	const struct dirent *d;
+	int rv = FTW_CONTINUE;
 
-	trace2("%s(%s)", __func__, dir_path);
-
-	dirfd = open(dir_path, O_RDONLY|O_NOCTTY|O_NONBLOCK|O_NOFOLLOW|O_DIRECTORY);
-	if (dirfd < 0) {
-		if (flags & FSUTIL_FTW_IGNORE_OPEN_ERROR)
-			return true;
-
-		log_error("unable to open dir %s: %m", dir_path);
+	ctx = fsutil_ftw_open(dir_path, flags, NULL);
+	if (ctx == NULL)
 		return false;
-	}
 
-	if (flags & FSUTIL_FTW_ONE_FILESYSTEM) {
-		if (fstat(dirfd, &stb) < 0) {
-			log_error("unable to stat %s: %m", dir_path);
-			ok = false;
-			goto out;
+	ctx->user_callback = callback;
+	ctx->user_closure = closure;
+
+	while (rv == FTW_CONTINUE) {
+		if ((d = __fsutil_ftw_next(ctx->current)) == NULL) {
+			if (ctx->callback_after) {
+				d = ctx->current->saved_dirent;
+				rv = __fsutil_ftw_do_callback(ctx, ctx->current->saved_dirent, FSUTIL_FTW_POST_DESCENT);
+			} else {
+				rv = FTW_CONTINUE;
+			}
+			if (!fsutil_ftw_return(ctx))
+				break;
+			continue;
 		}
-		dir_stat = &stb;
+
+		if (d->d_type == DT_DIR) {
+			if (ctx->callback_before)
+				rv = __fsutil_ftw_do_callback(ctx, d, FSUTIL_FTW_PRE_DESCENT);
+
+			if (rv == FTW_CONTINUE)
+				rv = fsutil_ftw_descend(ctx, d);
+			else if (rv == FTW_SKIP)
+				rv = FTW_CONTINUE;
+		} else {
+			rv = __fsutil_ftw_do_callback(ctx, d, 0);
+		}
 	}
 
-	ctx.user_callback = callback;
-	ctx.user_closure = closure;
-
-	ok = __fsutil_ftw(dir_path, dirfd, dir_stat, __fsutil_ftw_callback, &ctx, flags);
-
-out:
-	close(dirfd);
-	return ok;
+	fsutil_ftw_ctx_free(ctx);
+	return (rv == FTW_CONTINUE);
 }
 
 /*
@@ -1298,4 +1758,20 @@ strutil_array_destroy(struct strutil_array *array)
 		free(array->data);
 
 	memset(array, 0, sizeof(*array));
+}
+
+bool
+strutil_array_contains(const struct strutil_array *array, const char *s)
+{
+	unsigned int i;
+
+	if (s == NULL)
+		return false;
+
+	for (i = 0; i < array->count; ++i) {
+		if (!strcmp(array->data[i], s))
+			return true;
+	}
+
+	return false;
 }

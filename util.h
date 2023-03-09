@@ -22,6 +22,7 @@
 #define _WORMHOLE_UTIL_H
 
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <dirent.h>
 
 struct strutil_array {
@@ -88,6 +89,8 @@ extern const char *		fsutil_get_filesystem_type(const char *path);
 #define FSUTIL_FTW_PRE_POST_CALLBACK	0x0004
 #define FSUTIL_FTW_ONE_FILESYSTEM	0x0008
 #define FSUTIL_FTW_OVERRIDE_OPEN_ERROR	0x0010
+#define FSUTIL_FTW_SORTED		0x0020
+#define FSUTIL_FTW_NEED_STAT		0x0040
 
 /* ftw callback flags */
 #define FSUTIL_FTW_PRE_DESCENT		0x0010
@@ -100,8 +103,23 @@ enum {
 	FTW_CONTINUE
 };
 
+struct fsutil_ftw_cursor {
+	const struct dirent *	d;
+	char			path[PATH_MAX];
+	const char *		relative_path;
+
+	const struct stat *	st;
+	struct stat		_st;
+};
+
 typedef int			fsutil_ftw_cb_fn_t(const char *dir_path, const struct dirent *d, int flags, void *closure);
 extern bool			fsutil_ftw(const char *dir_path, fsutil_ftw_cb_fn_t *callback, void *closure, int flags);
+
+extern struct fsutil_ftw_ctx *	fsutil_ftw_open(const char *dir_path, int flags, const char *root_dir);
+extern bool			fsutil_ftw_exclude(struct fsutil_ftw_ctx *ctx, const char *path);
+extern const struct dirent *	fsutil_ftw_next(struct fsutil_ftw_ctx *ctx, struct fsutil_ftw_cursor *cursor);
+extern bool			fsutil_ftw_skip(struct fsutil_ftw_ctx *ctx, const struct fsutil_ftw_cursor *cursor);
+extern void			fsutil_ftw_ctx_free(struct fsutil_ftw_ctx *ctx);
 
 extern bool			fsutil_mount_overlay(const char *lowerdir,
 					const char *upperdir,
@@ -130,6 +148,7 @@ strutil_drop(char **var)
 
 extern void			strutil_array_init(struct strutil_array *);
 extern void			strutil_array_append(struct strutil_array *, const char *);
+extern bool			strutil_array_contains(const struct strutil_array *, const char *);
 extern void			strutil_array_append_array(struct strutil_array *, const struct strutil_array *);
 extern void			strutil_array_destroy(struct strutil_array *);
 
