@@ -139,6 +139,7 @@ extern bool			fsutil_dir_is_mountpoint(const char *path);
 extern bool			strutil_equal(const char *s1, const char *s2);
 extern bool			strutil_string_in_list(const char *needle, const char **haystack);
 extern void			strutil_set(char **var, const char *value);
+extern char *			__strutil_trim(char *);
 
 static inline void
 strutil_drop(char **var)

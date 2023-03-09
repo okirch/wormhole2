@@ -35,6 +35,7 @@
 #include <libgen.h>
 #include <errno.h>
 #include <assert.h>
+#include <ctype.h>
 
 #include "tracing.h"
 #include "util.h"
@@ -1710,6 +1711,20 @@ strutil_equal(const char *s1, const char *s2)
 		return s1 == s2;
 
 	return !strcmp(s1, s2);
+}
+
+char *
+__strutil_trim(char *s)
+{
+	int n;
+
+	while (isspace(*s))
+		++s;
+
+	n = strlen(s);
+	while (n && isspace(s[n-1]))
+		s[--n] = '\0';
+	return s;
 }
 
 void
