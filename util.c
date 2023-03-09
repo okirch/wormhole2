@@ -1753,6 +1753,39 @@ strutil_array_append(struct strutil_array *array, const char *value)
 	array->data[array->count++] = strdup(value);
 }
 
+char *
+strutil_array_join(const struct strutil_array *a, const char *sepa)
+{
+	unsigned int i, slen, tot_len;
+	char *result, *s;
+
+	if (a->count == 0)
+		return strdup("");
+
+	if (sepa == NULL)
+		sepa = "";
+	slen = strlen(sepa);
+
+	for (i = 0, tot_len = 0; i < a->count; ++i)
+		tot_len += strlen(a->data[i]);
+	tot_len += (a->count - 1) * slen;
+
+	result = malloc(tot_len + 1);
+	for (i = 0, s = result; i < a->count; ++i) {
+		unsigned int n  = strlen(a->data[i]);
+
+		if (i) {
+			memcpy(s, sepa, slen);
+			s += slen;
+		}
+		memcpy(s, a->data[i], n);
+		s += n;
+	}
+	*s++ = '\0';
+
+	return result;
+}
+
 void
 strutil_array_append_array(struct strutil_array *dst, const struct strutil_array *src)
 {
