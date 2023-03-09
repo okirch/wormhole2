@@ -97,13 +97,30 @@ struct wormhole_context {
 	struct fsutil_tempdir	temp;
 };
 
+struct mount_state *		mount_state_new(void);
+extern void			mount_state_free(struct mount_state *state);
+extern struct mount_leaf *	mount_state_create_leaf(struct mount_state *state, const char *relative_path);
+extern bool			mount_state_make_relative(struct mount_state *state,
+					const char *common_root);
 extern bool			mount_state_discover(const char *mtab,
 					bool (*report_fn)(void *user_data,
 							const char *mount_point,
 							const char *mnt_type,
 							const char *fsname),
 					void *user_data);
-extern void			mount_state_free(struct mount_state *state);
+
+extern void			mount_leaf_free(struct mount_leaf *leaf);
+extern struct mount_leaf *	mount_leaf_new(const char *name, const char *relative_path);
+extern bool		mount_leaf_is_mountpoint(const struct mount_leaf *leaf);
+extern bool		mount_leaf_is_below_mountpoint(const struct mount_leaf *leaf);
+extern struct mount_leaf *	mount_leaf_lookup(struct mount_leaf *parent, const char *relative_path, bool create);
+extern bool			mount_leaf_set_fstype(struct mount_leaf *leaf, const char *fstype, struct mount_farm *farm);
+extern bool			mount_leaf_add_lower(struct mount_leaf *leaf, const char *path);
+extern char *			mount_leaf_build_lowerspec(const struct mount_leaf *leaf);
+extern bool			mount_leaf_mount(const struct mount_leaf *leaf);
+extern bool			mount_leaf_traverse(struct mount_leaf *node, bool (*visitorfn)(const struct mount_leaf *));
+extern void			mount_tree_print(struct mount_leaf *leaf);
+
 
 extern struct wormhole_layer *	wormhole_layer_new(const char *name, const char *path, unsigned int depth);
 extern void			wormhole_layer_free(struct wormhole_layer *layer);

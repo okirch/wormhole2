@@ -24,6 +24,7 @@ IMGDELTA_OBJS	= $(IMGDELTA_SRCS:.c=.o)
 LIB		= libwormhole.a
 LIB_SRCS	= \
 		  layer.c \
+		  fstree.c \
 		  mntent2.c \
 		  tracing.c \
 		  util.c
