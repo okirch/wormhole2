@@ -212,9 +212,17 @@ copy_file(const char *system_path, const char *image_path, const struct stat *st
 
 	dstfd = open(image_path, O_CREAT | O_WRONLY | O_TRUNC, st->st_mode & 0777);
 	if (dstfd < 0) {
-		log_error("%s: unable to create file: %m", image_path);
-		close(srcfd);
-		return false;
+		if (errno == ENOENT) {
+			const char *parent_path = pathutil_dirname(image_path);
+			(void) fsutil_makedirs(parent_path, 0755);
+			dstfd = open(image_path, O_CREAT | O_WRONLY | O_TRUNC, st->st_mode & 0777);
+		}
+
+		if (dstfd < 0) {
+			log_error("%s: unable to create file: %m", image_path);
+			close(srcfd);
+			return false;
+		}
 	}
 
 	while ((rcount = read(srcfd, buffer, sizeof(buffer))) > 0) {
