@@ -65,7 +65,8 @@ struct wormhole_layer {
 	char *			rpmdb_path;
 
 	bool			is_root;
-	struct strutil_array	directories;
+
+	struct strutil_array	stacked_directories;
 
 	/* if 0, referenced by command line */
 	unsigned int		depth;

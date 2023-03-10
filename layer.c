@@ -155,7 +155,7 @@ wormhole_layer_load_config(struct wormhole_layer *layer)
 			strutil_array_append(&layer->used, value);
 		} else
 		if (!strcmp(kwd, "directory")) {
-			strutil_array_append(&layer->directories, value);
+			strutil_array_append(&layer->stacked_directories, value);
 		} else {
 			log_error("%s:%u: unsupported directive %s=%s",
 					layer->config_path, line,
@@ -185,8 +185,8 @@ wormhole_layer_save_config(struct wormhole_layer *layer)
 		fprintf(fp, "is-root=true\n");
 	for (i = 0; i < layer->used.count; ++i)
 		fprintf(fp, "use-layer=%s\n", layer->used.data[i]);
-	for (i = 0; i < layer->directories.count; ++i)
-		fprintf(fp, "directory=%s\n", layer->directories.data[i]);
+	for (i = 0; i < layer->stacked_directories.count; ++i)
+		fprintf(fp, "directory=%s\n", layer->stacked_directories.data[i]);
 
 	fclose(fp);
 	return true;

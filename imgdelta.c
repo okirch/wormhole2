@@ -639,7 +639,7 @@ __update_layer_config(struct wormhole_layer *layer, struct imgdelta_config *cfg)
 		const char *dir_path = work.data[i];
 		unsigned int len;
 
-		strutil_array_append(&layer->directories, dir_path);
+		strutil_array_append(&layer->stacked_directories, dir_path);
 
 		len = strlen(dir_path);
 		while (i + 1 < work.count) {
