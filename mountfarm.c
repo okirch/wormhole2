@@ -173,6 +173,69 @@ mount_farm_has_mount_for(struct mount_farm *farm, const char *path)
 }
 
 struct mount_leaf *
+mount_farm_add_stacked(struct mount_farm *farm, const char *system_path)
+{
+	struct mount_leaf *leaf, *up;
+
+	if (!(leaf = mount_leaf_lookup(farm->root, system_path, true)))
+		return NULL;
+
+	if (leaf->export_type == WORMHOLE_EXPORT_STACKED)
+		return leaf;
+
+	if (leaf->export_type != WORMHOLE_EXPORT_NONE) {
+		log_error("%s: conflicting export types", system_path);
+		return NULL;
+	}
+
+	for (up = leaf->parent; up && up->export_type == WORMHOLE_EXPORT_NONE; up = up->parent)
+		;
+
+	if (up != NULL) {
+		/* Stacking something else below a stacked mount is not a problem */
+		if (up->export_type == WORMHOLE_EXPORT_STACKED)
+			return leaf;
+
+		if (up->export_type != WORMHOLE_EXPORT_TRANSPARENT) {
+			log_error("Cannot create stacked mount %s inside another stacked mount (%s)",
+					system_path, up->relative_path);
+			leaf->export_type = WORMHOLE_EXPORT_ERROR;
+			return NULL;
+		}
+	}
+
+	trace2("  mount farm: add new stacked mount %s", system_path);
+	leaf->export_type = WORMHOLE_EXPORT_STACKED;
+	return leaf;
+}
+
+struct mount_leaf *
+mount_farm_add_transparent(struct mount_farm *farm, const char *system_path)
+{
+	struct mount_leaf *leaf, *up;
+
+	if (!(leaf = mount_leaf_lookup(farm->root, system_path, true)))
+		return NULL;
+
+	if (leaf->export_type == WORMHOLE_EXPORT_TRANSPARENT)
+		return leaf;
+
+	for (up = leaf; up && up->export_type == WORMHOLE_EXPORT_NONE; up = up->parent)
+		;
+
+	if (up != NULL && up->export_type != WORMHOLE_EXPORT_TRANSPARENT) {
+		log_error("Cannot create transparent mount %s inside a mount of different type (%s)",
+				system_path, up->relative_path);
+		leaf->export_type = WORMHOLE_EXPORT_ERROR;
+		return NULL;
+	}
+
+	trace2("  mount farm: add new transparent mount %s", system_path);
+	leaf->export_type = WORMHOLE_EXPORT_TRANSPARENT;
+	return leaf;
+}
+
+struct mount_leaf *
 mount_farm_add_system_dir(struct mount_farm *farm, const char *system_path)
 {
 	struct mount_leaf *leaf;

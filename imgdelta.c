@@ -623,40 +623,65 @@ update_image(struct imgdelta_config *cfg)
 	return rv;
 }
 
+static struct mount_farm *
+create_mount_farm_for_layer(struct wormhole_layer *layer, struct imgdelta_config *cfg)
+{
+	struct mount_farm *farm;
+	unsigned int i;
+
+	farm = mount_farm_new(layer->image_path);
+
+	for (i = 0; i < cfg->makedirs.count; ++i) {
+		const char *dir_path = cfg->makedirs.data[i];
+
+		if (!mount_farm_add_transparent(farm, dir_path))
+			goto failed;
+	}
+
+	for (i = 0; i < cfg->copydirs.count; ++i) {
+		const char *dir_path = cfg->copydirs.data[i];
+
+		/* For non-root layers, only include directories if they're non-empty */
+		/* FIXME: it would be better to move this check to a later stage. If we
+		 * do it here, we may miss some consistency problems. */
+		if (!layer->is_root) {
+			const char *full_path = __fsutil_concat2(layer->image_path, dir_path);
+
+			if (!fsutil_exists(full_path) || fsutil_dir_is_empty(full_path)) {
+				trace("layer %s does not provide %s", layer->name, dir_path);
+				continue;
+			}
+		}
+
+		if (!mount_farm_add_stacked(farm, dir_path))
+			goto failed;
+	}
+
+	return farm;
+
+failed:
+	mount_farm_free(farm);
+	return NULL;
+}
+
 static bool
 __update_layer_config(struct wormhole_layer *layer, struct imgdelta_config *cfg)
 {
-	struct strutil_array work = { 0 };
-	unsigned int i;
+	struct mount_farm *farm;
 
 	layer->is_root = cfg->create_base_layer;
-
-	strutil_array_append_array(&work, &cfg->copydirs);
-	strutil_array_append_array(&work, &cfg->makedirs);
-	strutil_array_sort(&work);
-
-	for (i = 0; i < work.count; ++i) {
-		const char *dir_path = work.data[i];
-		unsigned int len;
-
-		strutil_array_append(&layer->stacked_directories, dir_path);
-
-		len = strlen(dir_path);
-		while (i + 1 < work.count) {
-			const char *next_dir = work.data[i + 1];
-
-			if (strncmp(dir_path, next_dir, len) || next_dir[len] != '/')
-				break;
-
-			/* Skip over the next entry as it is below the one we just copied */
-			i += 1;
-		}
-	}
-
 	if (!cfg->create_base_layer)
 		strutil_array_append_array(&layer->used, &cfg->layers_used);
 
-	strutil_array_destroy(&work);
+	if (!(farm = create_mount_farm_for_layer(layer, cfg)))
+		return false;
+
+	if (tracing_level > 1)
+		mount_farm_print_tree(farm);
+
+	wormhole_layer_update_from_mount_farm(layer, farm->root);
+	mount_farm_free(farm);
+
 	return true;
 }
 

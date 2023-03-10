@@ -26,6 +26,13 @@ struct mount_state {
 
 #define MOUNT_LEAF_LOWER_MAX	8
 
+enum {
+	WORMHOLE_EXPORT_ERROR = -1,
+	WORMHOLE_EXPORT_NONE,
+	WORMHOLE_EXPORT_STACKED,
+	WORMHOLE_EXPORT_TRANSPARENT,
+};
+
 struct mount_leaf {
 	struct mount_leaf *parent;
 	struct mount_leaf *next;
@@ -33,6 +40,8 @@ struct mount_leaf {
 
 	bool		readonly;
 	bool		nonempty;
+
+	int		export_type;
 
 	unsigned int	depth;
 	char *		name;
@@ -67,6 +76,7 @@ struct wormhole_layer {
 	bool			is_root;
 
 	struct strutil_array	stacked_directories;
+	struct strutil_array	transparent_directories;
 
 	/* if 0, referenced by command line */
 	unsigned int		depth;
@@ -120,6 +130,8 @@ extern struct mount_leaf *	mount_farm_find_leaf(struct mount_farm *farm, const c
 extern bool			mount_farm_mount_all(struct mount_farm *farm);
 extern struct mount_leaf *	mount_farm_add_system_dir(struct mount_farm *farm, const char *system_path);
 extern bool			mount_farm_bind_system_dir(struct mount_farm *farm, const char *system_path);
+extern struct mount_leaf *	mount_farm_add_stacked(struct mount_farm *farm, const char *system_path);
+extern struct mount_leaf *	mount_farm_add_transparent(struct mount_farm *farm, const char *system_path);
 extern bool			mount_farm_has_mount_for(struct mount_farm *farm, const char *path);
 extern struct mount_leaf *	mount_farm_add_virtual_mount(struct mount_farm *farm, const char *system_path, const char *fstype);
 extern bool			mount_farm_mount_into(struct mount_farm *farm, const char *src, const char *dst);
@@ -146,6 +158,7 @@ extern void			wormhole_layer_array_append(struct wormhole_layer_array *a, struct
 extern struct wormhole_layer *	wormhole_layer_array_find(struct wormhole_layer_array *a, const char *name);
 extern void			wormhole_layer_array_destroy(struct wormhole_layer_array *a);
 
+extern bool			wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct mount_leaf *tree);
 extern bool			wormhole_layers_resolve(struct wormhole_layer_array *a, const char *name);
 
 #endif /* WORMHOLE2_H */

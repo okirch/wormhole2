@@ -154,8 +154,11 @@ wormhole_layer_load_config(struct wormhole_layer *layer)
 		if (!strcmp(kwd, "use-layer")) {
 			strutil_array_append(&layer->used, value);
 		} else
-		if (!strcmp(kwd, "directory")) {
+		if (!strcmp(kwd, "stacked-mount")) {
 			strutil_array_append(&layer->stacked_directories, value);
+		} else
+		if (!strcmp(kwd, "transparent-mount")) {
+			strutil_array_append(&layer->transparent_directories, value);
 		} else {
 			log_error("%s:%u: unsupported directive %s=%s",
 					layer->config_path, line,
@@ -186,7 +189,9 @@ wormhole_layer_save_config(struct wormhole_layer *layer)
 	for (i = 0; i < layer->used.count; ++i)
 		fprintf(fp, "use-layer=%s\n", layer->used.data[i]);
 	for (i = 0; i < layer->stacked_directories.count; ++i)
-		fprintf(fp, "directory=%s\n", layer->stacked_directories.data[i]);
+		fprintf(fp, "stacked-mount=%s\n", layer->stacked_directories.data[i]);
+	for (i = 0; i < layer->transparent_directories.count; ++i)
+		fprintf(fp, "transparent-mount=%s\n", layer->transparent_directories.data[i]);
 
 	fclose(fp);
 	return true;
@@ -230,4 +235,28 @@ bool
 wormhole_layers_resolve(struct wormhole_layer_array *a, const char *name)
 {
 	return __wormhole_layers_resolve(a, name, 0);
+}
+
+bool
+wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct mount_leaf *tree)
+{
+	const struct mount_leaf *child;
+
+	if (tree->export_type == WORMHOLE_EXPORT_STACKED) {
+		strutil_array_append(&layer->stacked_directories, tree->relative_path);
+	} else
+	if (tree->export_type == WORMHOLE_EXPORT_TRANSPARENT) {
+		strutil_array_append(&layer->transparent_directories, tree->relative_path);
+	} else
+	if (tree->export_type != WORMHOLE_EXPORT_NONE) {
+		log_error("%s: bad export type %u at %s", __func__, tree->export_type, tree->relative_path);
+		return false;
+	}
+
+	for (child = tree->children; child; child = child->next) {
+		if (!wormhole_layer_update_from_mount_farm(layer, child))
+			return false;
+	}
+
+	return true;
 }

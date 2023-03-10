@@ -347,14 +347,27 @@ __mount_leaf_print(const struct mount_leaf *leaf)
 {
 	unsigned int ws = leaf->depth * 2;
 	const char *name = leaf->name;
+	const char *type;
 
 	if (!name || !*name)
 		name = "/";
 
+	switch (leaf->export_type) {
+	case WORMHOLE_EXPORT_NONE:
+		type = "none"; break;
+	case WORMHOLE_EXPORT_STACKED:
+		type = "stacked"; break;
+	case WORMHOLE_EXPORT_TRANSPARENT:
+		type = "transparent"; break;
+	case WORMHOLE_EXPORT_ERROR:
+	default:
+		type = "error"; break;
+	}
+
 	if (leaf->mountpoint) {
-		trace("%*.*s%s [%s mount on %s]", ws, ws, "", name, leaf->fstype, leaf->mountpoint);
+		trace("%*.*s%s %-12s [%s mount on %s]", ws, ws, "", name, type, leaf->fstype, leaf->mountpoint);
 	} else {
-		trace("%*.*s%s", ws, ws, "", name);
+		trace("%*.*s%s %s", ws, ws, "", name, type);
 	}
 	return true;
 }
