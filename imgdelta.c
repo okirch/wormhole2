@@ -94,36 +94,51 @@ __stat_to_type(const struct stat *st)
 }
 
 static inline bool
-__attrs_changed(const char *path, const struct stat *sta, const struct stat *stb)
+__attrs_changed(const char *patha, const struct stat *sta, const char *pathb, const struct stat *stb)
 {
 	bool changed = false;
 
 	if (sta->st_mode != stb->st_mode) {
-		trace("%s: mode changed 0%o -> 0%o", path, sta->st_mode, stb->st_mode);
+		trace("%s: mode changed 0%o -> 0%o", patha, sta->st_mode, stb->st_mode);
 		changed = true;
 	}
 
-	if (!S_ISDIR(stb->st_mode)) {
+	switch (stb->st_mode & S_IFMT) {
+	case S_IFREG:
 		if (sta->st_size != stb->st_size) {
-			trace("%s: size changed %lu -> %lu", path, (long) sta->st_size, (long) stb->st_size);
+			trace("%s: size changed %lu -> %lu", patha, (long) sta->st_size, (long) stb->st_size);
 			changed = true;
 		}
 
 		if (sta->st_mtim.tv_sec != stb->st_mtim.tv_sec
 		 || sta->st_mtim.tv_nsec / 1000 != stb->st_mtim.tv_nsec / 1000) {
-			trace("%s: mtime changed %lu.%09lu -> %lu.%09lu", path,
+			trace("%s: mtime changed %lu.%09lu -> %lu.%09lu", patha,
 					(long) sta->st_mtim.tv_sec,
 					(long) sta->st_mtim.tv_nsec,
 					(long) stb->st_mtim.tv_sec,
 					(long) stb->st_mtim.tv_nsec);
 			changed = true;
 		}
+		break;
+
+	case S_IFLNK:
+		{
+			char targeta[PATH_MAX], targetb[PATH_MAX];
+
+			if (readlink(pathb, targetb, sizeof(targetb)) < 0
+			 || readlink(patha, targeta, sizeof(targeta)) < 0
+			 || strcmp(targeta, targetb)) {
+				trace("%s: symlink target changed %s -> %s", patha, targeta, targetb);
+				changed = true;
+			}
+		}
+		break;
 	}
 
 	if (can_chown
 	 && sta->st_uid != stb->st_uid
 	 && sta->st_gid != stb->st_gid) {
-		trace("%s: owner changed from %u:%u -> %u:%u", path,
+		trace("%s: owner changed from %u:%u -> %u:%u", patha,
 				(int) sta->st_uid,
 				(int) sta->st_gid,
 				(int) stb->st_uid,
@@ -295,7 +310,7 @@ image_compare_copy(const char *image_root, struct fsutil_ftw_cursor *cursor)
 
 	image_path = __fsutil_concat2(image_root, cursor->path);
 	if (do_stat(image_path, &image_stb)
-	 && !__attrs_changed(cursor->path, &system_stb, &image_stb)) {
+	 && !__attrs_changed(cursor->path, &system_stb, image_path, &image_stb)) {
 		trace3("%s: unchanged", cursor->path);
 		return true;
 	}
