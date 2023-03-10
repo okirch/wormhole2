@@ -112,6 +112,19 @@ extern bool			mount_state_discover(const char *mtab,
 							const char *fsname),
 					void *user_data);
 
+extern struct mount_farm *	mount_farm_new(const char *farm_root);
+extern void			mount_farm_free(struct mount_farm *farm);
+extern bool			mount_farm_create_workspace(struct mount_farm *farm);
+extern bool			mount_farm_set_upper_base(struct mount_farm *farm, const char *upper_base);
+extern struct mount_leaf *	mount_farm_find_leaf(struct mount_farm *farm, const char *relative_path);
+extern bool			mount_farm_mount_all(struct mount_farm *farm);
+extern struct mount_leaf *	mount_farm_add_system_dir(struct mount_farm *farm, const char *system_path);
+extern bool			mount_farm_bind_system_dir(struct mount_farm *farm, const char *system_path);
+extern bool			mount_farm_has_mount_for(struct mount_farm *farm, const char *path);
+extern struct mount_leaf *	mount_farm_add_virtual_mount(struct mount_farm *farm, const char *system_path, const char *fstype);
+extern bool			mount_farm_mount_into(struct mount_farm *farm, const char *src, const char *dst);
+extern void			mount_farm_print_tree(struct mount_farm *farm);
+
 extern void			mount_leaf_free(struct mount_leaf *leaf);
 extern struct mount_leaf *	mount_leaf_new(const char *name, const char *relative_path);
 extern bool		mount_leaf_is_mountpoint(const struct mount_leaf *leaf);
