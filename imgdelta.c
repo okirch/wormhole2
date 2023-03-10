@@ -124,10 +124,12 @@ __attrs_changed(const char *patha, const struct stat *sta, const char *pathb, co
 	case S_IFLNK:
 		{
 			char targeta[PATH_MAX], targetb[PATH_MAX];
+			int lena, lenb;
 
-			if (readlink(pathb, targetb, sizeof(targetb)) < 0
-			 || readlink(patha, targeta, sizeof(targeta)) < 0
-			 || strcmp(targeta, targetb)) {
+			if ((lena = readlink(pathb, targetb, sizeof(targetb))) < 0
+			 || (lenb = readlink(patha, targeta, sizeof(targeta))) < 0
+			 || lena != lenb
+			 || strncmp(targeta, targetb, lena)) {
 				trace("%s: symlink target changed %s -> %s", patha, targeta, targetb);
 				changed = true;
 			}
