@@ -289,11 +289,27 @@ __image_copy(const char *image_root, const char *src_path, const char *relative_
 		(void) unlink(image_path);
 		trace2("create symlink %s -> %s", image_path, target);
 		if (symlink(target, image_path) < 0) {
-			log_error("%s: unable to create symlink to: %m", src_path, target);
+			log_error("%s: unable to create symlink to: %m", image_path, target);
 			return false;
 		}
+	} else
+	if (dt_type == DT_CHR || dt_type == DT_BLK) {
+		if (mknod(image_path, st->st_mode, st->st_rdev) < 0) {
+			log_error("%s: unable to create device node: %m", image_path);
+			return false;
+		}
+	} else
+	if (dt_type == DT_FIFO) {
+		if (mkfifo(image_path, st->st_mode) < 0) {
+			log_error("%s: unable to create FIFO: %m", image_path);
+			return false;
+		}
+	} else
+	if (dt_type == DT_SOCK || dt_type == DT_WHT) {
+		trace("%s: ignoring this type of file", src_path);
+		return true;
 	} else {
-		log_error("dirent type %u not yet implemented", dt_type);
+		log_error("%s: dirent type %u not yet implemented", src_path, dt_type);
 		return false;
 	}
 
