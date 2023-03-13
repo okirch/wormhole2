@@ -636,7 +636,7 @@ create_mount_farm_for_layer(struct wormhole_layer *layer, struct imgdelta_config
 	for (i = 0; i < cfg->makedirs.count; ++i) {
 		const char *dir_path = cfg->makedirs.data[i];
 
-		if (!mount_farm_add_transparent(farm, dir_path))
+		if (!mount_farm_add_transparent(farm, dir_path, layer))
 			goto failed;
 	}
 
@@ -655,7 +655,7 @@ create_mount_farm_for_layer(struct wormhole_layer *layer, struct imgdelta_config
 			}
 		}
 
-		if (!mount_farm_add_stacked(farm, dir_path))
+		if (!mount_farm_add_stacked(farm, dir_path, layer))
 			goto failed;
 	}
 
@@ -681,7 +681,7 @@ __update_layer_config(struct wormhole_layer *layer, struct imgdelta_config *cfg)
 	if (tracing_level > 1)
 		mount_farm_print_tree(farm);
 
-	wormhole_layer_update_from_mount_farm(layer, farm->root);
+	wormhole_layer_update_from_mount_farm(layer, farm->tree->root);
 	mount_farm_free(farm);
 
 	return true;

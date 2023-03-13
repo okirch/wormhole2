@@ -246,30 +246,21 @@ mount_leaf_add_lower(struct mount_leaf *leaf, const char *path)
 char *
 mount_leaf_build_lowerspec(const struct mount_leaf *leaf)
 {
-	const unsigned int bufsz = 8192;
-	char *lowerspec;
-	unsigned int n, wpos;
+	const struct wormhole_layer_array *layers = &leaf->attached_layers;
+	struct strutil_array dirs = { 0, };
+	unsigned int n;
+	char *result;
 
-	lowerspec = malloc(bufsz);
-	for (n = 0, wpos = 0; n < leaf->nlower; ++n) {
-		const char *lower = leaf->lower[n];
-		unsigned int lower_len;
+	for (n = 0; n < layers->count; ++n) {
+		struct wormhole_layer *layer = layers->data[n];
 
-		if (wpos != 0)
-			lowerspec[wpos++] = ':';
-
-		lower_len = strlen(lower);
-		if (wpos + lower_len >= bufsz) {
-			log_error("Too many names in lowerdir spec at %s\n", leaf->relative_path);
-			return false;
-		}
-
-		memcpy(lowerspec + wpos, lower, lower_len);
-		wpos += lower_len;
+		strutil_array_append(&dirs, __fsutil_concat2(layer->image_path, leaf->relative_path));
 	}
 
-	lowerspec[wpos++] = '\0';
-	return lowerspec;
+	result = strutil_array_join(&dirs, ":");
+	strutil_array_destroy(&dirs);
+
+	return result;
 }
 
 bool
@@ -289,17 +280,24 @@ mount_leaf_mount(const struct mount_leaf *leaf)
 	if (chown(leaf->upper, 0, 0))
 		log_warning("Unable to chown %s: %m", leaf->upper);
 
+	if (leaf->parent && leaf->parent->export_type == WORMHOLE_EXPORT_ROOT)
+		(void) fsutil_makedirs(leaf->mountpoint, 0755);
+
 	if (strcmp(leaf->fstype, "overlay")) {
+		const char *fsname = "wormhole";
+
+		if (!strcmp(leaf->fstype, "bind")) {
+			trace("Binding mounting %s\n", leaf->relative_path);
+			return fsutil_mount_bind(leaf->relative_path, leaf->mountpoint, false);
+		}
+
 		trace("Mounting %s file system on %s\n", leaf->fstype, leaf->relative_path);
-		if (mount("wormhole", leaf->mountpoint, leaf->fstype, MS_NOATIME|MS_LAZYTIME, NULL) < 0) {
+		if (mount(fsname, leaf->mountpoint, leaf->fstype, MS_NOATIME|MS_LAZYTIME, NULL) < 0) {
 			log_error("Unable to mount %s fs on %s: %m\n", leaf->fstype, leaf->mountpoint);
 			return NULL;
 		}
 		return true;
 	}
-
-	if (leaf->nlower == 0)
-		return true;
 
 	if (!(lowerspec = mount_leaf_build_lowerspec(leaf)))
 		return false;
@@ -342,6 +340,25 @@ mount_leaf_traverse(struct mount_leaf *node, bool (*visitorfn)(const struct moun
 	return ok;
 }
 
+const char *
+mount_export_type_as_string(int export_type)
+{
+	switch (export_type) {
+	case WORMHOLE_EXPORT_ROOT:
+		return "root";
+	case WORMHOLE_EXPORT_NONE:
+		return "none";
+	case WORMHOLE_EXPORT_STACKED:
+		return "stacked";
+	case WORMHOLE_EXPORT_TRANSPARENT:
+		return "transparent";
+	case WORMHOLE_EXPORT_ERROR:
+		return "error";
+	}
+
+	return "unknown";
+}
+
 bool
 __mount_leaf_print(const struct mount_leaf *leaf)
 {
@@ -352,18 +369,7 @@ __mount_leaf_print(const struct mount_leaf *leaf)
 	if (!name || !*name)
 		name = "/";
 
-	switch (leaf->export_type) {
-	case WORMHOLE_EXPORT_NONE:
-		type = "none"; break;
-	case WORMHOLE_EXPORT_STACKED:
-		type = "stacked"; break;
-	case WORMHOLE_EXPORT_TRANSPARENT:
-		type = "transparent"; break;
-	case WORMHOLE_EXPORT_ERROR:
-	default:
-		type = "error"; break;
-	}
-
+	type = mount_export_type_as_string(leaf->export_type);
 	if (leaf->mountpoint) {
 		trace("%*.*s%s %-12s [%s mount on %s]", ws, ws, "", name, type, leaf->fstype, leaf->mountpoint);
 	} else {
@@ -378,3 +384,72 @@ mount_tree_print(struct mount_leaf *leaf)
 	mount_leaf_traverse(leaf, __mount_leaf_print);
 }
 
+/*
+ * Walk a mount tree
+ */
+enum {
+	TREE_ITER_DOWN = 0x01,
+	TREE_ITER_RIGHT = 0x02,
+};
+struct mount_state_iter {
+	struct mount_leaf *	current;
+	struct mount_leaf *	next;
+	int			direction;
+};
+
+struct mount_state_iter *
+mount_state_iterator_new(struct mount_state *state)
+{
+	struct mount_state_iter *it;
+
+	it = calloc(1, sizeof(*it));
+	it->next = state->root;
+	it->direction = TREE_ITER_DOWN;
+	return it;
+}
+
+static struct mount_leaf *
+__mount_state_iterator_next(struct mount_leaf *current, unsigned int dir_mask)
+{
+	struct mount_leaf *next = current;
+
+	while (next != NULL) {
+		if ((dir_mask & TREE_ITER_DOWN) && next->children)
+			return next->children;
+
+		if ((dir_mask & TREE_ITER_RIGHT) && next->next)
+			return next->next;
+
+		/* Move up and to the right */
+		dir_mask = TREE_ITER_RIGHT;
+		next = next->parent;
+	}
+
+	return next;
+}
+
+struct mount_leaf *
+mount_state_iterator_next(struct mount_state_iter *it)
+{
+	struct mount_leaf *current = it->next;
+
+	it->next = __mount_state_iterator_next(it->next, TREE_ITER_DOWN | TREE_ITER_RIGHT);
+	it->current = current;
+	return current;
+}
+
+void
+mount_state_iterator_skip(struct mount_state_iter *it, struct mount_leaf *leaf)
+{
+	if (it->current == leaf) {
+		/* Force a move up and then right */
+		it->next = __mount_state_iterator_next(it->current, 0);
+		it->current = NULL;
+	}
+}
+
+void
+mount_state_iterator_free(struct mount_state_iter *it)
+{
+	free(it);
+}

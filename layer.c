@@ -55,9 +55,11 @@ wormhole_layer_free(struct wormhole_layer *layer)
 	strutil_set(&layer->image_path, NULL);
 	strutil_set(&layer->rpmdb_path, NULL);
 
+#if 0
 	if (layer->tree)
 		mount_state_free(layer->tree);
 	layer->tree = NULL;
+#endif
 
 	free(layer);
 }
@@ -255,6 +257,30 @@ wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct
 
 	for (child = tree->children; child; child = child->next) {
 		if (!wormhole_layer_update_from_mount_farm(layer, child))
+			return false;
+	}
+
+	return true;
+}
+
+bool
+wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm *farm)
+{
+	struct mount_leaf *new_mount;
+	unsigned int i;
+
+	for (i = 0; i < layer->stacked_directories.count; ++i) {
+		const char *dir_path = layer->stacked_directories.data[i];
+
+		if (!(new_mount = mount_farm_add_stacked(farm, dir_path, layer)))
+			return false;
+		mount_leaf_set_fstype(new_mount, "overlay", farm);
+	}
+
+	for (i = 0; i < layer->transparent_directories.count; ++i) {
+		const char *dir_path = layer->transparent_directories.data[i];
+
+		if (!mount_farm_add_transparent(farm, dir_path, layer))
 			return false;
 	}
 

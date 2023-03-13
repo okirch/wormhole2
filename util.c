@@ -733,6 +733,17 @@ fsutil_isdir(const char *path)
 }
 
 bool
+fsutil_isblk(const char *path)
+{
+	struct stat stb;
+
+	if (lstat(path, &stb) < 0)
+		return false;
+
+	return !!S_ISBLK(stb.st_mode);
+}
+
+bool
 fsutil_exists(const char *path)
 {
 	return access(path, F_OK) >= 0;
@@ -1377,6 +1388,8 @@ fsutil_ftw(const char *dir_path, fsutil_ftw_cb_fn_t *callback, void *closure, in
 		}
 
 		if (d->d_type == DT_DIR) {
+			if (!strcmp(d->d_name, ".") || !strcmp(d->d_name, ".."))
+				continue;
 			if (ctx->callback_before)
 				rv = __fsutil_ftw_do_callback(ctx, d, FSUTIL_FTW_PRE_DESCENT);
 

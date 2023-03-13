@@ -83,7 +83,8 @@ __mount_layer_discover_callback(const char *dir_path, const struct dirent *d, in
 	return FTW_CONTINUE;
 }
 
-static struct mount_state *
+/* nukeme */
+struct mount_state *
 mount_layer_discover(struct wormhole_layer *layer)
 {
 	const char *tree_path = layer->image_path;
@@ -116,18 +117,29 @@ __mount_farm_discover_callback(void *closure, const char *mount_point,
 	struct mount_state *state = closure;
 	struct mount_leaf *leaf;
 
+	if (!strcmp(mount_point, "/"))
+		return true;
+
 	if (!strncmp(mount_point, "/tmp/", 5)) {
-		log_debug("Ignoring mount point %s\n", mount_point);
+		trace3("Ignoring mount point %s\n", mount_point);
 		return true;
 	}
 
-	leaf = mount_leaf_lookup(state->root, mount_point, true);
+	trace("try to add %s %s", mount_point, mnt_type);
+	leaf = mount_state_add_export(state, mount_point, WORMHOLE_EXPORT_TRANSPARENT, NULL);
 	if (leaf == NULL) {
-		log_error("mount_leaf_lookup(%s) failed\n", mount_point);
+		log_error("mount_farm_add_transparent(%s) failed\n", mount_point);
 		return false;
 	}
 
+	if (leaf->fstype) {
+		log_error("%s: duplicate mount (%s -> %s)", mount_point, leaf->fstype, mnt_type);
+		return false;
+	}
+	assert(leaf->fstype == NULL);
+	assert(leaf->fsname == NULL);
 	leaf->fstype = strdup(mnt_type);
+	leaf->fsname = strdup(fsname);
 	return true;
 }
 
@@ -176,7 +188,7 @@ mount_farm_discover_system_dir_with_submounts(struct mount_farm *farm, struct mo
 			}
 
 			if (mount_farm_has_mount_for(farm, system_path)) {
-				trace("we already have a mount for %s", system_path);
+				/* trace("we already have a mount for %s", system_path); */
 				goto next;
 			}
 
@@ -188,7 +200,7 @@ mount_farm_discover_system_dir_with_submounts(struct mount_farm *farm, struct mo
 				if (mount_farm_add_system_dir(farm, system_path) == NULL)
 					okay = false;
 			} else {
-				trace("we do not yet have a mount for %s", child->relative_path);
+				/* trace("we do not yet have a mount for %s", child->relative_path); */
 				if (!mount_farm_discover_system_dir_with_submounts(farm, child, always_use_overlays))
 					okay = false;
 			}
@@ -227,13 +239,14 @@ __mount_farm_discover_system_dir(struct mount_farm *farm, struct mount_state *st
 	return true;
 }
 
-static bool
+bool
 mount_farm_discover_system_dir(struct mount_farm *farm, struct mount_state *state, const char *system_path)
 {
 	return __mount_farm_discover_system_dir(farm, state, system_path, true);
 }
 
-static bool
+/* nukeme */
+bool
 __mount_farm_apply_layer(struct mount_farm *farm, struct mount_leaf *farm_dir, struct mount_leaf *layer_dir)
 {
 	struct mount_leaf *layer_child, *farm_child;
@@ -261,44 +274,134 @@ __mount_farm_apply_layer(struct mount_farm *farm, struct mount_leaf *farm_dir, s
 }
 
 static bool
-mount_farm_apply_layer(struct mount_farm *farm, struct mount_state *layer_state)
+mount_farm_apply_layer(struct mount_farm *farm, struct wormhole_layer *layer)
 {
-	return __mount_farm_apply_layer(farm, farm->root, layer_state->root);
+	return wormhole_layer_build_mount_farm(layer, farm);
 }
+
+static bool
+mount_farm_discover_system_mounts(struct mount_farm *farm)
+{
+	struct mount_state *state = NULL;
+	struct mount_state_iter *it;
+	struct mount_leaf *leaf;
+
+	trace("Discovering system mounts");
+
+	state = mount_state_new();
+	if (!mount_state_discover(NULL, __mount_farm_discover_callback, state)) {
+		log_error("Mount state discovery failed\n");
+		return false;
+	}
+
+	it = mount_state_iterator_new(state);
+	while ((leaf = mount_state_iterator_next(it)) != NULL) {
+		struct mount_leaf *new_mount;
+
+		trace("  %s", leaf->relative_path);
+
+		/* Just an internal tree node, not a mount */
+		if (leaf->export_type == WORMHOLE_EXPORT_NONE)
+			continue;
+
+		if (!strncmp(leaf->relative_path, "/usr", 4)
+		 || !strncmp(leaf->relative_path, "/bin", 4)
+		 || !strncmp(leaf->relative_path, "/lib", 4)
+		 || !strncmp(leaf->relative_path, "/lib64", 6)) {
+			log_warning("Ignoring mount point %s", leaf->relative_path);
+			continue;
+		}
+
+		new_mount = mount_farm_add_transparent(farm, leaf->relative_path, NULL);
+		if (leaf->fsname && leaf->fsname[0] == '/' && fsutil_isblk(leaf->fsname)) {
+			/* this is a mount of an actual block based file system */
+			trace("%s is a mount of %s", leaf->relative_path, leaf->fsname);
+			mount_leaf_set_fstype(new_mount, "bind", farm);
+		} else
+		if (new_mount->fstype == NULL || !strcmp(new_mount->fstype, leaf->fstype)) {
+			/* Most likely a virtual FS */
+			mount_leaf_set_fstype(new_mount, leaf->fstype, farm);
+		}
+	}
+
+	mount_state_iterator_free(it);
+	mount_state_free(state);
+	return true;
+}
+
+static bool
+mount_farm_apply_quirks(struct mount_farm *farm)
+{
+	struct mount_leaf *leaf;
+
+	/* In some configurations, /dev will not be a devfs but just a regular directory
+	 * with some static files in it. Catch this case. */
+	if (!(leaf = mount_farm_add_transparent(farm, "/dev", NULL)))
+		return false;
+
+	if (leaf->fstype == NULL)
+		mount_leaf_set_fstype(leaf, "bind", farm);
+
+	if (!(leaf = mount_farm_add_transparent(farm, "/tmp", NULL)))
+		return false;
+
+	mount_leaf_set_fstype(leaf, "tmpfs", farm);
+
+	trace("Assembled tree:");
+	mount_tree_print(farm->tree->root);
+	trace("---");
+
+	return true;
+}
+
+static bool
+mount_farm_fill_holes(struct mount_farm *farm)
+{
+	struct mount_state_iter *it;
+	struct mount_leaf *leaf;
+	bool okay = true;
+
+	trace("Completing system mounts");
+	it = mount_state_iterator_new(farm->tree);
+	while (okay && (leaf = mount_state_iterator_next(it)) != NULL) {
+		/* Just an internal tree node, not a mount */
+		if (leaf->export_type == WORMHOLE_EXPORT_ROOT) {
+			/* It's a static directory at the tree root. Make sure it
+			 * exists. */
+			okay = mount_farm_add_missing_children(farm, leaf->relative_path);
+			continue;
+		}
+	}
+
+	mount_state_iterator_free(it);
+	return true;
+}
+
 
 bool
 mount_farm_discover(struct mount_farm *farm, struct wormhole_layer_array *layers)
 {
-	struct mount_state *state = NULL;
-	bool okay = false, use_overlays = true;
+	bool okay = false;
 	unsigned int i;
 
-	state = mount_state_new();
-
-	if (!mount_state_discover(NULL, __mount_farm_discover_callback, state)) {
-		log_error("Mount state discovery failed\n");
-		goto out;
-	}
-
-	mount_farm_discover_system_dir(farm, state, "/etc");
-	mount_farm_discover_system_dir(farm, state, "/bin");
-	mount_farm_discover_system_dir(farm, state, "/sbin");
-	mount_farm_discover_system_dir(farm, state, "/var");
-	mount_farm_discover_system_dir(farm, state, "/lib");
-	mount_farm_discover_system_dir(farm, state, "/lib64");
-	mount_farm_discover_system_dir(farm, state, "/usr");
-
+	trace("Applying layers");
 	for (i = 0; i < layers->count; ++i) {
-		if (!mount_farm_apply_layer(farm, layers->data[i]->tree))
+		if (!mount_farm_apply_layer(farm, layers->data[i]))
 			goto out;
-		use_overlays = false;
 	}
 
-	okay = __mount_farm_discover_system_dir(farm, state, "/", use_overlays);
+	if (mount_farm_discover_system_mounts(farm)
+	 && mount_farm_apply_quirks(farm)
+	 && mount_farm_percolate(farm)
+	 && mount_farm_fill_holes(farm)) {
+		trace("Final tree:");
+		mount_farm_print_tree(farm);
+		trace("---");
+
+		okay = true;
+	}
 
 out:
-	if (state)
-		mount_state_free(state);
 	return okay;
 }
 
@@ -312,6 +415,9 @@ mount_farm_assemble_for_build(struct mount_farm *farm, struct wormhole_layer_arr
 	mount_farm_add_virtual_mount(farm, "/run", "tmpfs");
 	mount_farm_add_virtual_mount(farm, "/boot", "hidden");
 
+	/* mount_farm_add_virtual_mount(farm, WORMHOLE_LAYER_BASE_PATH, "hidden"); */
+	mount_farm_add_virtual_mount(farm, WORMHOLE_LAYER_BASE_PATH, "tmpfs");
+
 	if (!mount_farm_discover(farm, layers))
 		return false;
 
@@ -321,24 +427,15 @@ mount_farm_assemble_for_build(struct mount_farm *farm, struct wormhole_layer_arr
 bool
 mount_farm_assemble_for_run(struct mount_farm *farm, struct wormhole_layer_array *layers)
 {
-	bool okay = false;
-
-	mount_farm_bind_system_dir(farm, "/proc");
-	mount_farm_bind_system_dir(farm, "/sys");
-	mount_farm_bind_system_dir(farm, "/dev");
-	mount_farm_bind_system_dir(farm, "/run");
-	mount_farm_add_virtual_mount(farm, "/boot", "hidden");
-
-	okay = mount_farm_discover(farm, layers);
-	return okay;
+	return mount_farm_discover(farm, layers);
 }
 
 static int
-perform_build(struct wormhole_context *ctx)
+run_the_command(struct wormhole_context *ctx)
 {
 	int status, exit_status;
 
-	log_info("Performing build:\n");
+	trace("Running command:");
 	if (!procutil_command_run(&ctx->command, &status)) {
 		exit_status = 12;
 	} else
@@ -349,18 +446,7 @@ perform_build(struct wormhole_context *ctx)
 		trace("Command exited with status %d\n", exit_status);
 	}
 
-	log_info("---\n");
-
 	return exit_status;
-}
-
-static int
-perform_use(void)
-{
-	system("ls -la /usr/lib/python3.6/site-packages/parse.py");
-	system("ls -la /usr/lib/python3.6/site-packages/parse-*/");
-	system("echo 'Counting files in site-packages'; ls -la /usr/lib/python3.6/site-packages/ | wc");
-	return 0;
 }
 
 enum {
@@ -372,13 +458,13 @@ enum {
 };
 
 bool
-wormhole_layer_patch_rpmdb(struct wormhole_layer *layer, const char *rpmdb_orig)
+wormhole_layer_patch_rpmdb(struct wormhole_layer *layer, const char *rpmdb_orig, const char *image_root)
 {
 	char cmdbuf[1024];
 
 	snprintf(cmdbuf, sizeof(cmdbuf),
-			"rpmhack --orig-root '%s' --patch-path '%s' patch %s",
-			rpmdb_orig, layer->rpmdb_path, layer->image_path);
+			"rpmhack --patch-path '%s' patch %s",
+			layer->rpmdb_path, image_root);
 	trace("Executing %s", cmdbuf);
 
 	if (system(cmdbuf) != 0) {
@@ -390,13 +476,13 @@ wormhole_layer_patch_rpmdb(struct wormhole_layer *layer, const char *rpmdb_orig)
 }
 
 bool
-wormhole_layer_diff_rpmdb(struct wormhole_layer *layer, const char *rpmdb_orig)
+wormhole_layer_diff_rpmdb(struct wormhole_layer *layer, const char *rpmdb_orig, const char *new_root)
 {
 	char cmdbuf[1024];
 
 	snprintf(cmdbuf, sizeof(cmdbuf),
-			"rpmhack --orig-root '%s' --patch-path '%s' diff %s",
-			rpmdb_orig, layer->rpmdb_path, layer->image_path);
+			"rpmhack --patch-path '%s' diff %s",
+			layer->rpmdb_path, new_root);
 	trace("Executing %s", cmdbuf);
 
 	if (system(cmdbuf) != 0) {
@@ -421,6 +507,7 @@ wormhole_context_free(struct wormhole_context *ctx)
 		ctx->farm = NULL;
 	}
 
+	strutil_array_destroy(&ctx->layer_names);
 	wormhole_layer_array_destroy(&ctx->layers);
 
 	free(ctx);
@@ -443,6 +530,7 @@ wormhole_context_new(void)
 	}
 
 	strutil_set(&ctx->workspace, workspace);
+	pathutil_concat2(&ctx->layer_path, workspace, "layers");
 
 	if (getuid() == 0)
 		ctx->use_privileged_namespace = true;
@@ -475,13 +563,38 @@ wormhole_context_set_build(struct wormhole_context *ctx, const char *name, const
 		log_fatal("Cannot set build root to $PWD/wormhole-build");
 }
 
+static const char *
+wormhole_context_mount_layer(struct wormhole_context *ctx, const char *name)
+{
+	static char layer_bind_path[PATH_MAX];
+	char layer_system_path[PATH_MAX];
+
+	/* We need to remount /usr/lib/platform/layers/foobar to some temporary
+	 * directory, because the layer may provive a /usr overlay - and the kernel
+	 * shows a lack of humor when you try to overlay
+	 * /usr/lib/platform/layers/foobar/image/usr on top of /usr.
+	 */
+	snprintf(layer_bind_path, sizeof(layer_bind_path), "%s/%s", ctx->layer_path, name);
+	if (!fsutil_makedirs(layer_bind_path, 0755)) {
+		log_error("Unable to create %s: %m\n", layer_bind_path);
+		return NULL;
+	}
+
+	snprintf(layer_system_path, sizeof(layer_system_path), "%s/%s", WORMHOLE_LAYER_BASE_PATH, name);
+	if (!__mount_bind(layer_system_path, layer_bind_path, 0))
+		return NULL;
+
+	return layer_bind_path;
+}
 
 static bool
-__wormhole_context_use_layer(struct wormhole_context *ctx, const char *name, unsigned int depth)
+__wormhole_context_resolve_layer(struct wormhole_context *ctx, const char *name, unsigned int depth)
 {
-	struct wormhole_layer *layer;
+	struct wormhole_layer *layer = NULL;
+	const char *layer_path;
 	unsigned int i;
 
+	trace("%s(%s)", __func__, name);
 	if (depth > 100) {
 		log_error("too many nested layers, possibly a circular reference");
 		return false;
@@ -490,19 +603,30 @@ __wormhole_context_use_layer(struct wormhole_context *ctx, const char *name, uns
 	if (wormhole_layer_array_find(&ctx->layers, name))
 		return true;
 
-	layer = wormhole_layer_new(name, NULL, depth);
+	/* FIXME: dump this */
+	/* We need to remount /usr/lib/platform/layers/foobar to some temporary
+	 * directory, because the layer may provide a /usr overlay - and the kernel
+	 * shows a lack of humor when you try to overlay
+	 * /usr/lib/platform/layers/foobar/image/usr on top of /use.
+	 */
+	if (!(layer_path = wormhole_context_mount_layer(ctx, name)))
+		goto failed;
+
+	layer = wormhole_layer_new(name, layer_path, depth);
 
 	if (!wormhole_layer_load_config(layer))
 		goto failed;
 
+#if 0
 	if (!(layer->tree = mount_layer_discover(layer))) {
 		log_error("%s does not look like a valid wormhole layer", layer->path);
 		goto failed;
 	}
+#endif
 
 	/* Now resolve the lower layers referenced by this one */
 	for (i = 0; i < layer->used.count; ++i) {
-		if (!__wormhole_context_use_layer(ctx, layer->used.data[i], depth + 1))
+		if (!__wormhole_context_resolve_layer(ctx, layer->used.data[i], depth + 1))
 			goto failed;
 	}
 
@@ -510,14 +634,47 @@ __wormhole_context_use_layer(struct wormhole_context *ctx, const char *name, uns
 	return true;
 
 failed:
-	wormhole_layer_free(layer);
+	if (layer)
+		wormhole_layer_free(layer);
 	return false;
+}
+
+static bool
+wormhole_context_resolve_layers(struct wormhole_context *ctx)
+{
+	unsigned int i;
+
+	trace("%s()", __func__);
+	for (i = 0; i < ctx->layer_names.count; ++i) {
+		const char *name = ctx->layer_names.data[i];
+
+		if (!__wormhole_context_resolve_layer(ctx, name, 0))
+			return false;
+	}
+
+	if (ctx->layers.count == 0 || !ctx->layers.data[0]->is_root) {
+		log_error("Refusing to run without a root layer");
+		return false;
+	}
+
+	for (i = 1; i < ctx->layers.count; ++i) {
+		if (ctx->layers.data[i]->is_root) {
+			log_error("Misconfiguration - cannot run with two different root layers (%s and %s)",
+					ctx->layers.data[0]->name,
+					ctx->layers.data[i]->name);
+			return false;
+		}
+	}
+
+	trace("configured %u layers", ctx->layers.count);
+	return true;
 }
 
 bool
 wormhole_context_use_layer(struct wormhole_context *ctx, const char *name)
 {
-	return __wormhole_context_use_layer(ctx, name, 0);
+	strutil_array_append(&ctx->layer_names, name);
+	return true;
 }
 
 bool
@@ -578,30 +735,23 @@ wormhole_context_mount_tree(struct wormhole_context *ctx)
 	return true;
 }
 
-
 static bool
 prepare_tree_for_building(struct wormhole_context *ctx)
 {
 	struct mount_farm *farm = ctx->farm;
 
+	trace("%s()", __func__);
 	assert(ctx->build_root);
 
 	if (!mount_farm_set_upper_base(farm, ctx->build_root))
 		return false;
 
-	if (!mount_farm_assemble_for_build(farm, &ctx->layers))
+	if (!wormhole_context_resolve_layers(ctx))
 		return false;
 
-	if (ctx->manage_rpmdb && ctx->layers.count) {
-		const char *rpmdb_orig = RPMDB_PATH;
-		unsigned int i;
-
-		trace("Building RPM database");
-		for (i = 0; i < ctx->layers.count; ++i) {
-			if (!wormhole_layer_patch_rpmdb(ctx->layers.data[i], rpmdb_orig))
-				return false;
-		}
-	}
+	trace("About to call mount_farm_assemble_for_build");
+	if (!mount_farm_assemble_for_build(farm, &ctx->layers))
+		return false;
 
 	return true;
 }
@@ -610,6 +760,12 @@ static bool
 prepare_tree_for_use(struct wormhole_context *ctx)
 {
 	struct mount_farm *farm = ctx->farm;
+
+	trace("%s()", __func__);
+	ctx->farm->tree->root->export_type = WORMHOLE_EXPORT_ROOT;
+
+	if (!wormhole_context_resolve_layers(ctx))
+		return false;
 
 	if (!mount_farm_assemble_for_run(farm, &ctx->layers))
 		return false;
@@ -657,6 +813,7 @@ wormhole_context_switch_root(struct wormhole_context *ctx)
 	if (wormhole_in_chroot) {
 		/* Not optimal. Any mounts will propagate, and will be
 		 * visible even outside the chroot environment :-( */
+		trace2("Changing root to %s", farm->chroot);
 		chdir(farm->chroot);
 		if (chroot(farm->chroot) < 0) {
 			perror("chroot");
@@ -685,7 +842,7 @@ wormhole_context_switch_root(struct wormhole_context *ctx)
 }
 
 bool
-wormhole_context_perform_in_container(struct wormhole_context *ctx, int (*fn)(struct wormhole_context *))
+wormhole_context_perform_in_container(struct wormhole_context *ctx, int (*fn)(struct wormhole_context *), bool nofork)
 {
 	int status;
 	pid_t pid;
@@ -695,7 +852,12 @@ wormhole_context_perform_in_container(struct wormhole_context *ctx, int (*fn)(st
 		log_fatal("Unable to fork: %m");
 
 	if (pid == 0) {
-		exit(fn(ctx));
+		int exit_status;
+
+		trace("%s: executing subprocess callback %p", __func__, fn);
+		exit_status = fn(ctx);
+		trace("%s: subprocess going to terminate normally, exit status = %d", __func__, exit_status);
+		exit(exit_status);
 	}
 
 	if (!procutil_wait_for(pid, &status)) {
@@ -713,6 +875,7 @@ wormhole_context_perform_in_container(struct wormhole_context *ctx, int (*fn)(st
 		return false;
 	}
 
+	trace("Container sub-process exited with status %d", ctx->exit_status);
 	return true;
 }
 
@@ -728,10 +891,42 @@ __perform_build(struct wormhole_context *ctx)
 	 || !wormhole_context_mount_tree(ctx))
 		goto out;
 
+	if (ctx->manage_rpmdb && ctx->layers.count) {
+		const char *rpmdb_orig = RPMDB_PATH;
+		unsigned int i;
+
+		trace("Building RPM database");
+		for (i = 0; i < ctx->layers.count; ++i) {
+			struct wormhole_layer *layer = ctx->layers.data[i];
+
+			trace("layer %s root %s isdir %u",
+					layer->name, layer->path,
+					fsutil_isdir(layer->path));
+			{
+				char x[1024];
+				sprintf(x, "find %s -ls", layer->rpmdb_path);
+				system(x);
+			}
+			if (!wormhole_layer_patch_rpmdb(ctx->layers.data[i], rpmdb_orig, ctx->farm->chroot))
+				goto out;
+		}
+
+		{
+			char x[1024];
+
+			sprintf(x, "rpm --root %s -V libsqlite3-0", ctx->farm->chroot);
+			trace("about to call %s", x);
+			system(x);
+			sprintf(x, "rpm --root %s -qi python310-base", ctx->farm->chroot);
+			trace("about to call %s", x);
+			system(x);
+		}
+	}
+
 	if (!wormhole_context_switch_root(ctx))
 		goto out;
 
-	return perform_build(ctx);
+	return run_the_command(ctx);
 
 out:
 	return ctx->exit_status;
@@ -790,6 +985,12 @@ __prune_build(struct wormhole_context *ctx)
 
 	tracing_set_level(saved_tracing_level);
 
+	/* FIXME: remove files:
+	 *   - /usr/lib/sysimage/rpm
+	 *   - /etc/ld.so.conf
+	 *   - /var/cache/ldconfig
+	 */
+
 	prune_ctx.image_root = concat_path(ctx->build_root, "image");
 	prune_ctx.mounts = ctx->farm;
 
@@ -812,11 +1013,13 @@ do_build(struct wormhole_context *ctx)
 		return;
 	}
 
-	if (!wormhole_context_perform_in_container(ctx, __perform_build))
+	trace("Performing build stage");
+	if (!wormhole_context_perform_in_container(ctx, __perform_build, false))
 		return;
 
 	/* Now post-process the build. */
-	if (!wormhole_context_perform_in_container(ctx, __prune_build))
+	trace("Post-process build result");
+	if (!wormhole_context_perform_in_container(ctx, __prune_build, false))
 		return;
 
 	layer = wormhole_layer_new(ctx->build_target, ctx->build_root, 0);
@@ -832,7 +1035,7 @@ do_build(struct wormhole_context *ctx)
 
 		if (ctx->layers.count)
 			rpmdb_orig = ctx->layers.data[ctx->layers.count - 1]->rpmdb_path;
-		if (!wormhole_layer_diff_rpmdb(layer, rpmdb_orig)) {
+		if (!wormhole_layer_diff_rpmdb(layer, rpmdb_orig, ctx->farm->chroot)) {
 			log_error("Failed to create RPM database diff");
 			return;
 		}
@@ -860,7 +1063,7 @@ __run_container(struct wormhole_context *ctx)
 	if (!wormhole_context_switch_root(ctx))
 		goto out;
 
-	return perform_use();
+	return run_the_command(ctx);
 
 out:
 	return 42;
@@ -869,7 +1072,7 @@ out:
 static void
 do_run(struct wormhole_context *ctx)
 {
-	if (!wormhole_context_perform_in_container(ctx, __run_container))
+	if (!wormhole_context_perform_in_container(ctx, __run_container, false))
 		return;
 
 	ctx->exit_status = 0;

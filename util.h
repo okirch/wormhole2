@@ -76,6 +76,7 @@ extern bool			fsutil_create_empty(const char *path);
 extern bool			fsutil_check_path_prefix(const char *path, const char *potential_prefix);
 extern const char *		fsutil_strip_path_prefix(const char *path, const char *potential_prefix);
 extern bool			fsutil_isdir(const char *path);
+extern bool			fsutil_isblk(const char *path);
 extern bool			fsutil_dir_is_empty(const char *path);
 extern bool			fsutil_exists(const char *path);
 extern bool			fsutil_exists_nofollow(const char *path);
