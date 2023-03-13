@@ -39,18 +39,6 @@
 
 bool			wormhole_in_chroot = false;
 
-/* fixme: make all callers use fsutil_bind_mount() */
-static bool
-__mount_bind(const char *src, const char *dst, int extra_flags)
-{
-	trace("Binding %s to %s\n", src, dst);
-	if (mount(src, dst, NULL, MS_BIND | extra_flags, NULL) < 0) {
-		log_error("Unable to bind mount %s on %s: %m\n", src, dst);
-		return false;
-	}
-	return true;
-}
-
 static char *
 concat_path(const char *parent, const char *name)
 {
@@ -559,10 +547,10 @@ prepare_tree_for_messing_around(struct wormhole_context *ctx)
 	if (umount("/usr/local") < 0)
 		perror("fnord2");
 	system("grep /local /proc/mounts");
-	if (!__mount_bind("/usr", "/var/tmp/lalla/lower", 0))
+	if (!fsutil_mount_bind("/usr", "/var/tmp/lalla/lower", 0))
 		return false;
 	system("ls /var/tmp/lalla/lower/local");
-	if (!__mount_bind("/var/tmp/lalla/usr-local", "/var/tmp/lalla/lower/local", 0))
+	if (!fsutil_mount_bind("/var/tmp/lalla/usr-local", "/var/tmp/lalla/lower/local", 0))
 		return false;
 
 	if (mount("wormhole", "/var/tmp/lalla/root", "overlay", MS_NOATIME|MS_LAZYTIME|MS_RDONLY,
@@ -590,7 +578,7 @@ wormhole_context_switch_root(struct wormhole_context *ctx)
 		}
 	} else {
 		/* bind mount the chroot directory to /mnt, then clean up the temp dir. */
-		if (!__mount_bind(farm->chroot, "/mnt", MS_REC))
+		if (!fsutil_mount_bind(farm->chroot, "/mnt", true))
 			return 1;
 
 		fsutil_tempdir_unmount(&ctx->temp);
