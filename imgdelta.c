@@ -567,19 +567,19 @@ update_image_work(struct imgdelta_config *cfg, const char *tpath)
 		return 1;
 
 	trace("=== Building image delta between system and %s ===", overlay);
-	for (i = 0; i < cfg->copydirs.count; ++i) {
-		const char *dir_path = cfg->copydirs.data[i];
+	for (i = 0; i < cfg->stacked_mounts.count; ++i) {
+		const char *dir_path = cfg->stacked_mounts.data[i];
 
 		rv = update_image_partial(cfg, overlay, dir_path);
 		if (rv != 0)
 			return rv;
 	}
 
-	if (cfg->makedirs.count) {
+	if (cfg->transparent_mounts.count) {
 		trace("=== Creating empty directories ===");
 
-		for (i = 0; i < cfg->makedirs.count; ++i) {
-			const char *dir_path = cfg->makedirs.data[i];
+		for (i = 0; i < cfg->transparent_mounts.count; ++i) {
+			const char *dir_path = cfg->transparent_mounts.data[i];
 
 			if (!fsutil_makedirs(__fsutil_concat2(overlay, dir_path), 0755))
 				rv = 1;
@@ -633,15 +633,15 @@ create_mount_farm_for_layer(struct wormhole_layer *layer, struct imgdelta_config
 
 	farm = mount_farm_new(layer->image_path);
 
-	for (i = 0; i < cfg->makedirs.count; ++i) {
-		const char *dir_path = cfg->makedirs.data[i];
+	for (i = 0; i < cfg->transparent_mounts.count; ++i) {
+		const char *dir_path = cfg->transparent_mounts.data[i];
 
 		if (!mount_farm_add_transparent(farm, dir_path, layer))
 			goto failed;
 	}
 
-	for (i = 0; i < cfg->copydirs.count; ++i) {
-		const char *dir_path = cfg->copydirs.data[i];
+	for (i = 0; i < cfg->stacked_mounts.count; ++i) {
+		const char *dir_path = cfg->stacked_mounts.data[i];
 
 		/* For non-root layers, only include directories if they're non-empty */
 		/* FIXME: it would be better to move this check to a later stage. If we
@@ -738,29 +738,29 @@ read_config(struct imgdelta_config *cfg, const char *filename)
 		else
 			value = __strutil_trim(value);
 
-		if (!strcmp(kwd, "copy")) {
+		if (!strcmp(kwd, "copy") || !strcmp(kwd, "stacked-mount")) {
 			if (value[0] != '/') {
-				log_error("%s:%u: argument to copy must be an absolute path", filename, lineno);
+				log_error("%s:%u: argument to %s must be an absolute path", filename, lineno, kwd);
 				goto done;
 			}
 
-			strutil_array_append(&cfg->copydirs, value);
+			strutil_array_append(&cfg->stacked_mounts, value);
 		} else
 		if (!strcmp(kwd, "exclude")) {
 			if (value[0] != '/') {
-				log_error("%s:%u: argument to exclude must be an absolute path", filename, lineno);
+				log_error("%s:%u: argument to %s must be an absolute path", filename, lineno, kwd);
 				goto done;
 			}
 
 			strutil_array_append(&cfg->excldirs, value);
 		} else
-		if (!strcmp(kwd, "makedir")) {
+		if (!strcmp(kwd, "makedir") || !strcmp(kwd, "transparent-mount")) {
 			if (value[0] != '/') {
-				log_error("%s:%u: argument to makedir must be an absolute path", filename, lineno);
+				log_error("%s:%u: argument to %s must be an absolute path", filename, lineno, kwd);
 				goto done;
 			}
 
-			strutil_array_append(&cfg->makedirs, value);
+			strutil_array_append(&cfg->transparent_mounts, value);
 		} else {
 			log_error("%s:%u: unknown keyword \"%s\"", filename, lineno, kwd);
 			goto done;
@@ -797,7 +797,7 @@ main(int argc, char **argv)
 			break;
 
 		case 'C':
-			strutil_array_append(&config.copydirs, optarg);
+			strutil_array_append(&config.stacked_mounts, optarg);
 			break;
 
 		case 'L':
@@ -834,11 +834,11 @@ main(int argc, char **argv)
 
 	config.layer = wormhole_layer_new(basename(layer_path), layer_path, 0);
 
-	if (config.copydirs.count == 0) {
+	if (config.stacked_mounts.count == 0) {
 		const char **dirs = default_copydirs, *path;
 
 		for (dirs = default_copydirs; (path = *dirs++) != NULL; )
-			strutil_array_append(&config.copydirs, path);
+			strutil_array_append(&config.stacked_mounts, path);
 	}
 
 	if (tracing_level > 0) {
@@ -854,8 +854,8 @@ main(int argc, char **argv)
 			for (i = 0; i < config.layers_used.count; ++i)
 				trace("  %s", config.layers_used.data[i]);
 		trace("Dirs to copy");
-		for (i = 0; i < config.copydirs.count; ++i)
-			trace("  %s", config.copydirs.data[i]);
+		for (i = 0; i < config.stacked_mounts.count; ++i)
+			trace("  %s", config.stacked_mounts.data[i]);
 		if (config.excldirs.count)
 			trace("Excluded");
 		for (i = 0; i < config.excldirs.count; ++i)

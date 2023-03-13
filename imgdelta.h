@@ -34,9 +34,10 @@ struct imgdelta_config {
 	struct strutil_array	layers_used;
 	struct strutil_array	layer_images;
 
-	struct strutil_array	copydirs;
+	struct strutil_array	stacked_mounts;
 	struct strutil_array	excldirs;
-	struct strutil_array	makedirs;
+
+	struct strutil_array	transparent_mounts;
 };
 
 #endif /* IMGDELTA_H */
