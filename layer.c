@@ -199,6 +199,30 @@ wormhole_layer_save_config(struct wormhole_layer *layer)
 	return true;
 }
 
+/*
+ * Remount /usr/lib/platform/layers/foobar to some tmpfs to shorten the path.
+ */
+bool
+wormhole_layer_remount_image(struct wormhole_layer *layer, const char *image_base)
+{
+	static char layer_bind_path[PATH_MAX];
+
+	snprintf(layer_bind_path, sizeof(layer_bind_path), "%s/%s/image", image_base, layer->name);
+	if (!fsutil_makedirs(layer_bind_path, 0755)) {
+		log_error("Unable to create %s: %m\n", layer_bind_path);
+		return false;
+	}
+
+	if (!fsutil_mount_bind(layer->image_path, layer_bind_path, false))
+		return false;
+
+	strutil_set(&layer->image_path, layer_bind_path);
+	return true;
+}
+
+/*
+ * For a given layer, find the layers it requires and load them
+ */
 static bool
 __wormhole_layers_resolve(struct wormhole_layer_array *layers, const char *name, unsigned int depth)
 {

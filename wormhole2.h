@@ -88,7 +88,9 @@ struct wormhole_context {
 	int			exit_status;
 
 	char *			workspace;
-	char *			layer_path;
+
+	/* This is where we remount the $layer/image directories to shorten the path names */
+	char *			image_path;
 
 	struct procutil_command	command;
 
@@ -159,6 +161,7 @@ extern struct wormhole_layer *	wormhole_layer_new(const char *name, const char *
 extern void			wormhole_layer_free(struct wormhole_layer *layer);
 extern bool			wormhole_layer_load_config(struct wormhole_layer *layer);
 extern bool			wormhole_layer_save_config(struct wormhole_layer *layer);
+extern bool			wormhole_layer_remount_image(struct wormhole_layer *layer, const char *image_base);
 extern void			wormhole_layer_array_append(struct wormhole_layer_array *a, struct wormhole_layer *layer);
 extern struct wormhole_layer *	wormhole_layer_array_find(struct wormhole_layer_array *a, const char *name);
 extern void			wormhole_layer_array_destroy(struct wormhole_layer_array *a);

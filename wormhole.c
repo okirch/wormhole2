@@ -339,7 +339,7 @@ wormhole_context_new(void)
 	}
 
 	strutil_set(&ctx->workspace, workspace);
-	pathutil_concat2(&ctx->layer_path, workspace, "layers");
+	pathutil_concat2(&ctx->image_path, workspace, "images");
 
 	if (getuid() == 0)
 		ctx->use_privileged_namespace = true;
@@ -372,35 +372,10 @@ wormhole_context_set_build(struct wormhole_context *ctx, const char *name, const
 		log_fatal("Cannot set build root to $PWD/wormhole-build");
 }
 
-static const char *
-wormhole_context_mount_layer(struct wormhole_context *ctx, const char *name)
-{
-	static char layer_bind_path[PATH_MAX];
-	char layer_system_path[PATH_MAX];
-
-	/* We need to remount /usr/lib/platform/layers/foobar to some temporary
-	 * directory, because the layer may provive a /usr overlay - and the kernel
-	 * shows a lack of humor when you try to overlay
-	 * /usr/lib/platform/layers/foobar/image/usr on top of /usr.
-	 */
-	snprintf(layer_bind_path, sizeof(layer_bind_path), "%s/%s", ctx->layer_path, name);
-	if (!fsutil_makedirs(layer_bind_path, 0755)) {
-		log_error("Unable to create %s: %m\n", layer_bind_path);
-		return NULL;
-	}
-
-	snprintf(layer_system_path, sizeof(layer_system_path), "%s/%s", WORMHOLE_LAYER_BASE_PATH, name);
-	if (!__mount_bind(layer_system_path, layer_bind_path, 0))
-		return NULL;
-
-	return layer_bind_path;
-}
-
 static bool
 __wormhole_context_resolve_layer(struct wormhole_context *ctx, const char *name, unsigned int depth)
 {
 	struct wormhole_layer *layer = NULL;
-	const char *layer_path;
 	unsigned int i;
 
 	if (depth > 100) {
@@ -411,26 +386,12 @@ __wormhole_context_resolve_layer(struct wormhole_context *ctx, const char *name,
 	if (wormhole_layer_array_find(&ctx->layers, name))
 		return true;
 
-	/* FIXME: dump this */
-	/* We need to remount /usr/lib/platform/layers/foobar to some temporary
-	 * directory, because the layer may provide a /usr overlay - and the kernel
-	 * shows a lack of humor when you try to overlay
-	 * /usr/lib/platform/layers/foobar/image/usr on top of /use.
-	 */
-	if (!(layer_path = wormhole_context_mount_layer(ctx, name)))
+	layer = wormhole_layer_new(name, NULL, depth);
+	if (!wormhole_layer_remount_image(layer, ctx->image_path))
 		goto failed;
-
-	layer = wormhole_layer_new(name, layer_path, depth);
 
 	if (!wormhole_layer_load_config(layer))
 		goto failed;
-
-#if 0
-	if (!(layer->tree = mount_layer_discover(layer))) {
-		log_error("%s does not look like a valid wormhole layer", layer->path);
-		goto failed;
-	}
-#endif
 
 	/* Now resolve the lower layers referenced by this one */
 	for (i = 0; i < layer->used.count; ++i) {
