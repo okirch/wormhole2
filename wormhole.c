@@ -125,7 +125,6 @@ __mount_farm_discover_callback(void *closure, const char *mount_point,
 		return true;
 	}
 
-	trace("try to add %s %s", mount_point, mnt_type);
 	leaf = mount_state_add_export(state, mount_point, WORMHOLE_EXPORT_TRANSPARENT, NULL);
 	if (leaf == NULL) {
 		log_error("mount_farm_add_transparent(%s) failed\n", mount_point);
@@ -594,7 +593,6 @@ __wormhole_context_resolve_layer(struct wormhole_context *ctx, const char *name,
 	const char *layer_path;
 	unsigned int i;
 
-	trace("%s(%s)", __func__, name);
 	if (depth > 100) {
 		log_error("too many nested layers, possibly a circular reference");
 		return false;

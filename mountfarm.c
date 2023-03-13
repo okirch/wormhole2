@@ -173,18 +173,63 @@ mount_farm_has_mount_for(struct mount_farm *farm, const char *path)
 }
 
 static bool
+__mount_farm_fudge_non_directory(struct mount_leaf *node, struct mount_leaf *closest_ancestor, int dtype, struct wormhole_layer *layer)
+{
+	trace("%s is not a directory - dt %u", node->relative_path, dtype);
+	node->dtype = dtype;
+
+	if (closest_ancestor->export_type == WORMHOLE_EXPORT_TRANSPARENT) {
+		/* We get here eg for /etc/passwd.
+		 * Transform this into a bind mount.
+		 */
+		if (dtype != DT_REG)
+			return false;
+
+		/* Transform this to a bind mount */
+		node->export_type = WORMHOLE_EXPORT_TRANSPARENT;
+		strutil_set(&node->fstype, "bind");
+
+		/* Remember the layer this file comes from for later reference
+		 * when we try to mount it. */
+		node->bind_mount_override_layer = layer;
+		return true;
+	} else
+	if (closest_ancestor->export_type == WORMHOLE_EXPORT_STACKED) {
+		/* We could deal with this situation y copying the file
+		 * in question to the ancestor's upperdir.
+		 */
+	}
+
+	return false;
+}
+
+static bool
 __mount_farm_percolate(struct mount_leaf *node, struct mount_leaf *closest_ancestor)
 {
 	struct mount_leaf *child;
 	unsigned int i;
 
-	// trace("%s(%s)", __func__, node->relative_path);
+	// trace("%s(%s [%s])", __func__, node->relative_path, mount_export_type_as_string(node->export_type));
 	if (node->export_type == WORMHOLE_EXPORT_STACKED) {
+		unsigned int n = 0;
+
 		if (node->attached_layers.count == 0) {
 			log_error("mount_farm_percolate: internal error - %s is a %s mount but has no layers",
 					node->relative_path,
 					mount_export_type_as_string(node->export_type));
 			return false;
+		}
+
+		for (n = node->attached_layers.count; n--; ) {
+			struct wormhole_layer *layer = node->attached_layers.data[n];
+			const char *image_path = __fsutil_concat2(layer->image_path, node->relative_path);
+			int dtype;
+
+			if ((dtype = fsutil_get_dtype(image_path)) >= 0) {
+				if (dtype != DT_DIR)
+					__mount_farm_fudge_non_directory(node, closest_ancestor, dtype, layer);
+				break;
+			}
 		}
 	}
 
@@ -252,6 +297,11 @@ __mount_farm_percolate(struct mount_leaf *node, struct mount_leaf *closest_ances
 
 	if (node->export_type != WORMHOLE_EXPORT_NONE)
 		closest_ancestor = node;
+
+	if (node->export_type == WORMHOLE_EXPORT_TRANSPARENT && node->fstype == NULL) {
+		log_error("Bug/problem: someone forgot to mark %s as a bind mount", node->relative_path);
+		return false;
+	}
 
 	for (child = node->children; child != NULL; child = child->next) {
 		if (!__mount_farm_percolate(child, closest_ancestor))

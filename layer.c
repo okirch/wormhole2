@@ -280,8 +280,9 @@ wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm 
 	for (i = 0; i < layer->transparent_directories.count; ++i) {
 		const char *dir_path = layer->transparent_directories.data[i];
 
-		if (!mount_farm_add_transparent(farm, dir_path, layer))
+		if (!(new_mount = mount_farm_add_transparent(farm, dir_path, layer)))
 			return false;
+		mount_leaf_set_fstype(new_mount, "bind", farm);
 	}
 
 	return true;

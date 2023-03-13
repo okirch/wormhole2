@@ -131,6 +131,7 @@ mount_leaf_new(const char *name, const char *relative_path)
 	leaf->name = strdup(name);
 	leaf->relative_path = strdup(relative_path);
 	leaf->full_path = strdup(relative_path);
+	leaf->dtype = -1;
 
 	return leaf;
 }
@@ -277,7 +278,7 @@ mount_leaf_mount(const struct mount_leaf *leaf)
 		return true;
 	}
 
-	if (chown(leaf->upper, 0, 0))
+	if (leaf->upper && chown(leaf->upper, 0, 0))
 		log_warning("Unable to chown %s: %m", leaf->upper);
 
 	if (leaf->parent && leaf->parent->export_type == WORMHOLE_EXPORT_ROOT)
@@ -287,8 +288,13 @@ mount_leaf_mount(const struct mount_leaf *leaf)
 		const char *fsname = "wormhole";
 
 		if (!strcmp(leaf->fstype, "bind")) {
-			trace("Binding mounting %s\n", leaf->relative_path);
-			return fsutil_mount_bind(leaf->relative_path, leaf->mountpoint, false);
+			const char *bind_source = leaf->relative_path;
+
+			if (leaf->bind_mount_override_layer)
+				bind_source = __fsutil_concat2(leaf->bind_mount_override_layer->image_path, bind_source);
+
+			trace("Binding mounting %s on %s\n", bind_source, leaf->relative_path);
+			return fsutil_mount_bind(bind_source, leaf->mountpoint, false);
 		}
 
 		trace("Mounting %s file system on %s\n", leaf->fstype, leaf->relative_path);
@@ -298,6 +304,9 @@ mount_leaf_mount(const struct mount_leaf *leaf)
 		}
 		return true;
 	}
+
+	if (leaf->dtype >= 0 && leaf->dtype != DT_REG && leaf->dtype != DT_LNK)
+		log_warning("%s is not a relative file; building an overlay will probably fail", leaf->relative_path);
 
 	if (!(lowerspec = mount_leaf_build_lowerspec(leaf)))
 		return false;

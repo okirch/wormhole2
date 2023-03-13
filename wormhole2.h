@@ -48,6 +48,7 @@ struct mount_leaf {
 	bool		nonempty;
 
 	int		export_type;
+	int		dtype;
 
 	unsigned int	depth;
 	char *		name;
@@ -63,6 +64,7 @@ struct mount_leaf {
 	unsigned int	nlower;
 	char *		lower[MOUNT_LEAF_LOWER_MAX];
 
+	struct wormhole_layer *bind_mount_override_layer;
 	struct wormhole_layer_array attached_layers;
 };
 
