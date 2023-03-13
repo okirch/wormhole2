@@ -38,6 +38,8 @@ struct imgdelta_config {
 	struct strutil_array	excldirs;
 
 	struct strutil_array	transparent_mounts;
+
+	struct strutil_array	entry_points;
 };
 
 #endif /* IMGDELTA_H */

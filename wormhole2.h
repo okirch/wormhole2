@@ -70,6 +70,7 @@ struct wormhole_layer {
 	char *			path;
 	char *			config_path;
 	char *			image_path;
+	char *			wrapper_path;
 	char *			rpmdb_path;
 
 	bool			is_root;
@@ -162,6 +163,7 @@ extern void			wormhole_layer_free(struct wormhole_layer *layer);
 extern bool			wormhole_layer_load_config(struct wormhole_layer *layer);
 extern bool			wormhole_layer_save_config(struct wormhole_layer *layer);
 extern bool			wormhole_layer_remount_image(struct wormhole_layer *layer, const char *image_base);
+extern bool			wormhole_layer_write_wrapper(struct wormhole_layer *layer, const char *app_path);
 extern void			wormhole_layer_array_append(struct wormhole_layer_array *a, struct wormhole_layer *layer);
 extern struct wormhole_layer *	wormhole_layer_array_find(struct wormhole_layer_array *a, const char *name);
 extern void			wormhole_layer_array_destroy(struct wormhole_layer_array *a);

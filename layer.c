@@ -42,6 +42,7 @@ wormhole_layer_new(const char *name, const char *path, unsigned int depth)
 		pathutil_concat2(&layer->path, WORMHOLE_LAYER_BASE_PATH, name);
 	pathutil_concat2(&layer->config_path, layer->path, "layer.conf");
 	pathutil_concat2(&layer->image_path, layer->path, "image");
+	pathutil_concat2(&layer->wrapper_path, layer->path, "bin");
 	pathutil_concat2(&layer->rpmdb_path, layer->path, "rpm.patch");
 
 	return layer;
@@ -53,13 +54,8 @@ wormhole_layer_free(struct wormhole_layer *layer)
 	strutil_set(&layer->name, NULL);
 	strutil_set(&layer->path, NULL);
 	strutil_set(&layer->image_path, NULL);
+	strutil_set(&layer->wrapper_path, NULL);
 	strutil_set(&layer->rpmdb_path, NULL);
-
-#if 0
-	if (layer->tree)
-		mount_state_free(layer->tree);
-	layer->tree = NULL;
-#endif
 
 	free(layer);
 }
@@ -196,6 +192,39 @@ wormhole_layer_save_config(struct wormhole_layer *layer)
 		fprintf(fp, "transparent-mount=%s\n", layer->transparent_directories.data[i]);
 
 	fclose(fp);
+	return true;
+}
+
+/*
+ * For a given entry point, create a wrapper scripts
+ */
+bool
+wormhole_layer_write_wrapper(struct wormhole_layer *layer, const char *app_path)
+{
+	const char *wrapper_path;
+	FILE *fp;
+
+	trace("Creating wrapper script for %s", app_path);
+	if (!fsutil_makedirs(layer->wrapper_path, 0755))
+		return false;
+
+	wrapper_path = __fsutil_concat2(layer->wrapper_path, basename(app_path));
+	if (!(fp = fopen(wrapper_path, "w"))) {
+		log_error("%s: %m", wrapper_path);
+		return false;
+	}
+
+	fprintf(fp, "#!/bin/bash\n");
+	fprintf(fp, "exec /usr/bin/wormhole -L \"%s\" %s \"$@\"\n",
+			layer->name, app_path);
+
+	fclose(fp);
+
+	if (chmod(wrapper_path, 0555) < 0) {
+		log_error("cannot chmod %s: %m", wrapper_path);
+		return false;
+	}
+
 	return true;
 }
 

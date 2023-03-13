@@ -569,6 +569,20 @@ update_image_work(struct imgdelta_config *cfg, const char *tpath)
 	if (!copy_recursively(upperdir, cfg->layer->image_path))
 		return 1;
 
+	if (cfg->entry_points.count) {
+		trace("=== Creating wrapper scripts ===");
+
+		for (i = 0; i < cfg->entry_points.count; ++i) {
+			const char *app_path = cfg->entry_points.data[i];
+
+			if (!wormhole_layer_write_wrapper(cfg->layer, app_path))
+				rv = 1;
+		}
+
+		if (rv)
+			return rv;
+	}
+
 	return 0;
 }
 
@@ -737,6 +751,14 @@ read_config(struct imgdelta_config *cfg, const char *filename)
 			}
 
 			strutil_array_append(&cfg->transparent_mounts, value);
+		} else
+		if (!strcmp(kwd, "entry-point")) {
+			if (value[0] != '/') {
+				log_error("%s:%u: argument to %s must be an absolute path", filename, lineno, kwd);
+				goto done;
+			}
+
+			strutil_array_append(&cfg->entry_points, value);
 		} else {
 			log_error("%s:%u: unknown keyword \"%s\"", filename, lineno, kwd);
 			goto done;
@@ -836,6 +858,11 @@ main(int argc, char **argv)
 			trace("Excluded");
 		for (i = 0; i < config.excldirs.count; ++i)
 			trace("  %s", config.excldirs.data[i]);
+
+		if (config.entry_points.count)
+			trace("Entry points");
+		for (i = 0; i < config.entry_points.count; ++i)
+			trace("  %s", config.entry_points.data[i]);
 	}
 
 	if (config.layers_used.count == 0 && !config.create_base_layer) {
