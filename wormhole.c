@@ -39,6 +39,7 @@
 
 bool			wormhole_in_chroot = false;
 
+/* fixme: make all callers use fsutil_bind_mount() */
 static bool
 __mount_bind(const char *src, const char *dst, int extra_flags)
 {
@@ -58,55 +59,6 @@ concat_path(const char *parent, const char *name)
 	if (path)
 		return strdup(path);
 	return NULL;
-}
-
-static int
-__mount_layer_discover_callback(const char *dir_path, const struct dirent *d, int flags, void *closure)
-{
-	struct mount_state *state = closure;
-
-	if (d->d_type == DT_UNKNOWN) {
-		log_error("%s/%s: cannot handle unknown dtype\n", dir_path, d->d_name);
-		return FTW_ERROR;
-	}
-
-	if (d->d_type == DT_DIR) {
-		const char *full_path = __fsutil_concat2(dir_path, d->d_name);
-		struct mount_leaf *leaf;
-
-		if (!(leaf = mount_state_create_leaf(state, full_path))) {
-			log_error("%s: cannot create tree node", full_path);
-			return FTW_ERROR;
-		}
-	}
-
-	return FTW_CONTINUE;
-}
-
-/* nukeme */
-struct mount_state *
-mount_layer_discover(struct wormhole_layer *layer)
-{
-	const char *tree_path = layer->image_path;
-	struct mount_state *state;
-	bool okay = false;
-
-	trace("%s(%s)", __func__, layer->image_path);
-
-	/* Walk the directory tree below $layer/image */
-	state = mount_state_new();
-	okay = fsutil_ftw(tree_path, __mount_layer_discover_callback, state, FSUTIL_FTW_ONE_FILESYSTEM);
-
-	/* Strip the $layer/image prefix off each node's relative_path */
-	if (okay)
-		okay = mount_state_make_relative(state, tree_path);
-
-	if (!okay && state) {
-		mount_state_free(state);
-		state = NULL;
-	}
-
-	return state;
 }
 
 static bool
@@ -140,136 +92,6 @@ __mount_farm_discover_callback(void *closure, const char *mount_point,
 	leaf->fstype = strdup(mnt_type);
 	leaf->fsname = strdup(fsname);
 	return true;
-}
-
-static struct mount_leaf *
-mount_state_find(struct mount_state *state, const char *path)
-{
-	return mount_leaf_lookup(state->root, path, false);
-}
-
-static bool
-mount_farm_discover_system_dir_with_submounts(struct mount_farm *farm, struct mount_leaf *to_be_exported, bool always_use_overlays)
-{
-	const char *dir_path = to_be_exported->relative_path;
-	DIR *dir;
-	struct dirent *d;
-	bool okay = true;
-
-	if (!(dir = opendir(dir_path))) {
-		log_error("Cannot open %s: %m\n", dir_path);
-		return false;
-	}
-
-	while (okay && (d = readdir(dir)) != NULL) {
-		if (d->d_type == DT_UNKNOWN) {
-			log_error("%s/%s: unknown\n", dir_path, d->d_name);
-			closedir(dir);
-			return false;
-		}
-
-		if (d->d_type == DT_DIR) {
-			char *system_path;
-			struct mount_leaf *child;
-
-			if (!strcmp(d->d_name, ".") || !strcmp(d->d_name, ".."))
-				continue;
-
-			system_path = concat_path(dir_path, d->d_name);
-			if (!always_use_overlays) {
-				struct mount_leaf *mount_node;
-
-				mount_node = mount_farm_find_leaf(farm, system_path);
-				if (mount_node == NULL) {
-					okay = mount_farm_mount_into(farm, system_path, system_path);
-					goto next;
-				}
-			}
-
-			if (mount_farm_has_mount_for(farm, system_path)) {
-				/* trace("we already have a mount for %s", system_path); */
-				goto next;
-			}
-
-			child = mount_leaf_lookup(to_be_exported, d->d_name, false);
-			if (child == NULL || child->children == NULL) {
-				/* There is no mount point for this directory, and no mount point below it.
-				 * Set up an overlay mount for this location.
-				 */
-				if (mount_farm_add_system_dir(farm, system_path) == NULL)
-					okay = false;
-			} else {
-				/* trace("we do not yet have a mount for %s", child->relative_path); */
-				if (!mount_farm_discover_system_dir_with_submounts(farm, child, always_use_overlays))
-					okay = false;
-			}
-
-next:
-			free(system_path);
-		} else {
-			trace3("%s/%s: other type\n", dir_path, d->d_name);
-		}
-	}
-
-	closedir(dir);
-	return okay;
-}
-
-static bool
-__mount_farm_discover_system_dir(struct mount_farm *farm, struct mount_state *state, const char *system_path, bool always_use_overlays)
-{
-	struct mount_leaf *leaf, *mounts;
-
-	leaf = mount_farm_find_leaf(farm, system_path);
-	if (leaf && mount_leaf_is_mountpoint(leaf)) {
-		trace("%s: we already have a mount for %s\n", __func__, system_path);
-		return true;
-	}
-
-	mounts = mount_state_find(state, system_path);
-	if (mounts == NULL || mounts->children == NULL) {
-		return mount_farm_add_system_dir(farm, system_path) != NULL;
-	}
-
-	trace("%s has child mounts\n", system_path);
-	if (!mount_farm_discover_system_dir_with_submounts(farm, mounts, always_use_overlays))
-		return false;
-
-	return true;
-}
-
-bool
-mount_farm_discover_system_dir(struct mount_farm *farm, struct mount_state *state, const char *system_path)
-{
-	return __mount_farm_discover_system_dir(farm, state, system_path, true);
-}
-
-/* nukeme */
-bool
-__mount_farm_apply_layer(struct mount_farm *farm, struct mount_leaf *farm_dir, struct mount_leaf *layer_dir)
-{
-	struct mount_leaf *layer_child, *farm_child;
-	bool okay = true;
-
-	for (layer_child = layer_dir->children; layer_child; layer_child = layer_child->next) {
-		farm_child = mount_leaf_lookup(farm_dir, layer_child->name, false);
-		if (farm_child == NULL) {
-			log_error("Image provides %s in non-canonical location", layer_child->relative_path);
-			return false;
-		}
-
-		if (farm_child->children == NULL) {
-			/* Now we should add the directory $image/foo/bar as a lowerdir to the
-			 * mount point of /foo/bar 
-			 */
-			okay = mount_leaf_add_lower(farm_child, layer_child->full_path);
-		}
-		else
-			if (!__mount_farm_apply_layer(farm, farm_child, layer_child))
-				return false;
-	}
-
-	return okay;
 }
 
 static bool
@@ -407,20 +229,8 @@ out:
 bool
 mount_farm_assemble_for_build(struct mount_farm *farm, struct wormhole_layer_array *layers)
 {
-	mount_farm_add_virtual_mount(farm, "/proc", "proc");
-	mount_farm_add_virtual_mount(farm, "/sys", "sysfs");
-	mount_farm_add_virtual_mount(farm, "/dev", "devpts");
-
-	mount_farm_add_virtual_mount(farm, "/run", "tmpfs");
-	mount_farm_add_virtual_mount(farm, "/boot", "hidden");
-
-	/* mount_farm_add_virtual_mount(farm, WORMHOLE_LAYER_BASE_PATH, "hidden"); */
-	mount_farm_add_virtual_mount(farm, WORMHOLE_LAYER_BASE_PATH, "tmpfs");
-
-	if (!mount_farm_discover(farm, layers))
-		return false;
-
-	return true;
+	log_error("Currently not implemented");
+	return false;
 }
 
 bool

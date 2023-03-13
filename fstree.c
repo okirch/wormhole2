@@ -216,34 +216,6 @@ mount_leaf_set_fstype(struct mount_leaf *leaf, const char *fstype, struct mount_
 	return leaf->upper && leaf->work && leaf->mountpoint;
 }
 
-bool
-mount_leaf_add_lower(struct mount_leaf *leaf, const char *path)
-{
-	unsigned int n;
-
-	if (leaf->fstype == NULL || strcmp(leaf->fstype, "overlay")) {
-		log_error("Cannot add lowerdir %s to %s - not configured as overlay mount",
-				path, leaf->relative_path);
-		return false;
-	}
-
-	/* avoid duplicates */
-	for (n = 0; n < leaf->nlower; ++n) {
-		if (!strcmp(leaf->lower[n], path))
-			return true;
-	}
-
-	if (leaf->nlower >= MOUNT_LEAF_LOWER_MAX) {
-		log_error("%s: too many lower mounts\n", leaf->relative_path);
-		return false;
-	}
-
-	trace("%s: adding lowerdir %s\n", leaf->relative_path, path);
-	assert(strncmp(path, "/tmp/wormhole", 13));
-	leaf->lower[leaf->nlower++] = strdup(path);
-	return true;
-}
-
 char *
 mount_leaf_build_lowerspec(const struct mount_leaf *leaf)
 {

@@ -7,7 +7,6 @@
 
 typedef struct mount_farm mount_farm_t;
 typedef struct mount_leaf mount_leaf_t;
-typedef struct mount_bind mount_bind_t;
 
 struct wormhole_layer_array {
 	unsigned int		count;
@@ -22,7 +21,6 @@ struct mount_farm {
 	unsigned int	num_mounts;
 
 	struct mount_state *tree;
-	struct mount_bind *binds;
 };
 
 struct mount_state {
@@ -61,18 +59,8 @@ struct mount_leaf {
 	char *		fstype;
 	char *		fsname;
 
-	unsigned int	nlower;
-	char *		lower[MOUNT_LEAF_LOWER_MAX];
-
 	struct wormhole_layer *bind_mount_override_layer;
 	struct wormhole_layer_array attached_layers;
-};
-
-struct mount_bind {
-	struct mount_bind *next;
-
-	char *		source;
-	char *		dest;
 };
 
 #define LOWER_LAYERS_MAX	8

@@ -39,39 +39,6 @@
 
 static unsigned int	num_mounted;
 
-static bool
-__mount_bind(const char *src, const char *dst, int extra_flags)
-{
-	trace("Binding %s to %s\n", src, dst);
-	if (mount(src, dst, NULL, MS_BIND | extra_flags, NULL) < 0) {
-		log_error("Unable to bind mount %s on %s: %m\n", src, dst);
-		return false;
-	}
-	return true;
-}
-
-static struct mount_bind *
-mount_bind_new(struct mount_farm *farm, const char *src, const char *dst)
-{
-	struct mount_bind *bind;
-
-	bind = calloc(1, sizeof(*bind));
-	bind->source = strdup(src);
-	bind->dest = strdup(dst);
-
-	bind->next = farm->binds;
-	farm->binds = bind;
-
-	return bind;
-}
-
-static void
-mount_bind_free(struct mount_bind *bind)
-{
-	strutil_drop(&bind->source);
-	strutil_drop(&bind->dest);
-}
-
 struct mount_farm *
 mount_farm_new(const char *farm_root)
 {
@@ -93,16 +60,10 @@ void
 mount_farm_free(struct mount_farm *farm)
 {
 	struct mount_leaf *root;
-	struct mount_bind *bind;
 
 	if ((root = farm->tree->root) != NULL) {
 		mount_leaf_free(root);
 		farm->tree->root = NULL;
-	}
-
-	while ((bind = farm->binds) != NULL) {
-		farm->binds = bind->next;
-		mount_bind_free(bind);
 	}
 
 	strutil_drop(&farm->upper_base);
@@ -260,7 +221,9 @@ __mount_farm_percolate(struct mount_leaf *node, struct mount_leaf *closest_ances
 	case EXPORT_COMBINATION(STACKED, TRANSPARENT):
 		/* FIXME: verify that any of the layers mounted on this
 		 * stacked mount point (aka overlay) provides
-		 * the required mount point. */
+		 * the required mount point.
+		 * If not, we could insert a lower layer at the very bottom
+		 * of the stack that contains the missing mount points. */
 		break;
 
 	case EXPORT_COMBINATION(ROOT, STACKED):
@@ -402,57 +365,6 @@ out:
 	return okay;
 }
 
-struct mount_leaf *
-mount_farm_add_system_dir(struct mount_farm *farm, const char *system_path)
-{
-	struct mount_leaf *leaf;
-
-	if (!(leaf = mount_leaf_lookup(farm->tree->root, system_path, true)))
-		return NULL;
-
-	if (!mount_leaf_set_fstype(leaf, "overlay", farm))
-		return NULL;
-
-	if (!mount_leaf_add_lower(leaf, system_path))
-		return NULL;
-
-	return leaf;
-}
-
-struct mount_leaf *
-mount_farm_add_virtual_mount(struct mount_farm *farm, const char *system_path, const char *fstype)
-{
-	struct mount_leaf *leaf;
-
-	if (!(leaf = mount_leaf_lookup(farm->tree->root, system_path, true)))
-		return NULL;
-
-	if (!mount_leaf_set_fstype(leaf, fstype, farm))
-		return NULL;
-
-	return leaf;
-}
-
-static struct mount_bind *
-mount_farm_add_bind(struct mount_farm *farm, const char *src, const char *dst)
-{
-	struct mount_bind *bind;
-
-	bind = mount_bind_new(farm, src, dst);
-	return bind;
-}
-
-struct mount_leaf *
-mount_farm_add_leaf_readonly(struct mount_farm *farm, const char *relative_path)
-{
-	struct mount_leaf *leaf;
-
-	leaf = mount_farm_add_system_dir(farm, relative_path);
-	if (leaf)
-		leaf->readonly = true;
-	return leaf;
-}
-
 static bool
 __mount_farm_mount_leaf(const struct mount_leaf *leaf)
 {
@@ -469,59 +381,11 @@ __mount_farm_mount_leaf(const struct mount_leaf *leaf)
 bool
 mount_farm_mount_all(struct mount_farm *farm)
 {
-	struct mount_bind *bind;
-
 	num_mounted = 0;
 
 	if (!mount_leaf_traverse(farm->tree->root, __mount_farm_mount_leaf))
 		return false;
 
-	for (bind = farm->binds; bind; bind = bind->next) {
-		if (!__mount_bind(bind->source, bind->dest, MS_REC))
-			return false;
-	}
-
 	farm->num_mounts = num_mounted;
 	return true;
 }
-
-/*
- * We want a file or directory to appear in the utility's environment.
- *
- * We first ensure that there is a mount point in the upperdir.
- * Then, after the overlayfs has been assembled, we mount the source object
- * inside the final tree.
- */
-bool
-mount_farm_mount_into(struct mount_farm *farm, const char *src, const char *dst)
-{
-	const char *loc, *mount;
-
-	/* Create the node on which we later bind the file */
-	if (fsutil_isdir(src))
-		loc = fsutil_makedir2(farm->upper_base, dst);
-	else
-		loc = fsutil_makefile2(farm->upper_base, dst);
-	if (loc == NULL)
-		return false;
-
-	if (chown(loc, 0, 0))
-		log_warning("Unable to chown %s: %m", loc);
-
-	mount = fsutil_makedir2(farm->chroot, dst);
-
-	trace("Setting up %s with binding to %s", mount, src);
-	return mount_farm_add_bind(farm, src, mount) != NULL;
-}
-
-bool
-mount_farm_bind_system_dir(struct mount_farm *farm, const char *system_path)
-{
-	if (!mount_farm_add_bind(farm, system_path, system_path))
-		return false;
-
-	/* This causes the discovery code to not descend into /proc and friends 
-	 * even in the run case. */
-	return mount_farm_add_virtual_mount(farm, system_path, "hidden");
-}
-
