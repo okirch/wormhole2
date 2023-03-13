@@ -743,6 +743,41 @@ fsutil_isblk(const char *path)
 	return !!S_ISBLK(stb.st_mode);
 }
 
+int
+__fsutil_get_dtype(const struct stat *st)
+{
+        switch (st->st_mode & S_IFMT) {
+        case S_IFREG:
+                return DT_REG;
+        case S_IFDIR:
+                return DT_DIR;
+        case S_IFLNK:
+                return DT_LNK;
+        case S_IFCHR:
+                return DT_CHR;
+        case S_IFBLK:
+                return DT_BLK;
+        case S_IFSOCK:
+                return DT_SOCK;
+        case S_IFIFO:
+                return DT_FIFO;
+        default:
+                break;
+        }
+        return DT_UNKNOWN;
+}
+
+int
+fsutil_get_dtype(const char *path)
+{
+	struct stat stb;
+
+	if (lstat(path, &stb) < 0)
+		return -1;
+
+	return __fsutil_get_dtype(&stb);
+}
+
 bool
 fsutil_exists(const char *path)
 {

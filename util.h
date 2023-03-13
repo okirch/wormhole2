@@ -75,6 +75,8 @@ extern bool			fsutil_makefile(const char *path, int mode);
 extern bool			fsutil_create_empty(const char *path);
 extern bool			fsutil_check_path_prefix(const char *path, const char *potential_prefix);
 extern const char *		fsutil_strip_path_prefix(const char *path, const char *potential_prefix);
+extern int			fsutil_get_dtype(const char *path);
+extern int			__fsutil_get_dtype(const struct stat *st);
 extern bool			fsutil_isdir(const char *path);
 extern bool			fsutil_isblk(const char *path);
 extern bool			fsutil_dir_is_empty(const char *path);

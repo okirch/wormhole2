@@ -69,30 +69,6 @@ do_stat(const char *path, struct stat *stb)
 	return stb;
 }
 
-static int
-__stat_to_type(const struct stat *st)
-{
-	switch (st->st_mode & S_IFMT) {
-	case S_IFREG:
-		return DT_REG;
-	case S_IFDIR:
-		return DT_DIR;
-	case S_IFLNK:
-		return DT_LNK;
-	case S_IFCHR:
-		return DT_CHR;
-	case S_IFBLK:
-		return DT_BLK;
-	case S_IFSOCK:
-		return DT_SOCK;
-	case S_IFIFO:
-		return DT_FIFO;
-	default:
-		break;
-	}
-	return DT_UNKNOWN;
-}
-
 static inline bool
 __attrs_changed(const char *patha, const struct stat *sta, const char *pathb, const struct stat *stb)
 {
@@ -430,7 +406,7 @@ update_image_partial(struct imgdelta_config *cfg, const char *image_root, const 
 		if (!do_stat(dir_path, &stb))
 			goto failed;
 
-		dt_type = __stat_to_type(&stb);
+		dt_type = __fsutil_get_dtype(&stb);
 		if (!__image_copy(image_root, dir_path, dir_path, dt_type, &stb))
 			goto failed;
 
