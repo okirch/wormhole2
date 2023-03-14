@@ -31,36 +31,36 @@
 #include "util.h"
 
 
-struct mount_state *
-mount_state_new(void)
+struct fstree *
+fstree_new(void)
 {
-	struct mount_state *state;
+	struct fstree *fstree;
 
-	state = calloc(1, sizeof(*state));
-	state->root = mount_leaf_new("", "/");
+	fstree = calloc(1, sizeof(*fstree));
+	fstree->root = mount_leaf_new("", "/");
 
-	return state;
+	return fstree;
 }
 
 void
-mount_state_free(struct mount_state *state)
+fstree_free(struct fstree *fstree)
 {
 	struct mount_leaf *root;
 
-	if ((root = state->root) != NULL) {
+	if ((root = fstree->root) != NULL) {
 		mount_leaf_free(root);
-		state->root = NULL;
+		fstree->root = NULL;
 	}
 }
 
 struct mount_leaf *
-mount_state_create_leaf(struct mount_state *state, const char *relative_path)
+fstree_create_leaf(struct fstree *fstree, const char *relative_path)
 {
-	return mount_leaf_lookup(state->root, relative_path, true);
+	return mount_leaf_lookup(fstree->root, relative_path, true);
 }
 
 static bool
-__mount_state_make_relative_paths(struct mount_leaf *leaf, const char *common_root, unsigned int len)
+__fstree_make_relative_paths(struct mount_leaf *leaf, const char *common_root, unsigned int len)
 {
 	struct mount_leaf *child;
 	bool okay = true;
@@ -78,7 +78,7 @@ __mount_state_make_relative_paths(struct mount_leaf *leaf, const char *common_ro
 
 	// trace(" %s -> %s", leaf->full_path, leaf->relative_path);
 	for (child = leaf->children; okay && child; child = child->next)
-		okay = __mount_state_make_relative_paths(child, common_root, len);
+		okay = __fstree_make_relative_paths(child, common_root, len);
 
 	return okay;
 
@@ -88,19 +88,19 @@ bad_path:
 }
 
 bool
-mount_state_make_relative(struct mount_state *state, const char *common_root)
+fstree_make_relative(struct fstree *fstree, const char *common_root)
 {
 	struct mount_leaf *layer_root;
 
-	layer_root = mount_leaf_lookup(state->root, common_root, false);
+	layer_root = mount_leaf_lookup(fstree->root, common_root, false);
 	if (!layer_root)
 		return false;
 
-	if (!__mount_state_make_relative_paths(layer_root, common_root, strlen(common_root)))
+	if (!__fstree_make_relative_paths(layer_root, common_root, strlen(common_root)))
 		return false;
 
 	/* XXX: we leak some memory here */
-	state->root = layer_root;
+	fstree->root = layer_root;
 	return true;
 }
 
@@ -445,25 +445,25 @@ enum {
 	TREE_ITER_DOWN = 0x01,
 	TREE_ITER_RIGHT = 0x02,
 };
-struct mount_state_iter {
+struct fstree_iter {
 	struct mount_leaf *	current;
 	struct mount_leaf *	next;
 	int			direction;
 };
 
-struct mount_state_iter *
-mount_state_iterator_new(struct mount_state *state)
+struct fstree_iter *
+fstree_iterator_new(struct fstree *fstree)
 {
-	struct mount_state_iter *it;
+	struct fstree_iter *it;
 
 	it = calloc(1, sizeof(*it));
-	it->next = state->root;
+	it->next = fstree->root;
 	it->direction = TREE_ITER_DOWN;
 	return it;
 }
 
 static struct mount_leaf *
-__mount_state_iterator_next(struct mount_leaf *current, unsigned int dir_mask)
+__fstree_iterator_next(struct mount_leaf *current, unsigned int dir_mask)
 {
 	struct mount_leaf *next = current;
 
@@ -483,27 +483,27 @@ __mount_state_iterator_next(struct mount_leaf *current, unsigned int dir_mask)
 }
 
 struct mount_leaf *
-mount_state_iterator_next(struct mount_state_iter *it)
+fstree_iterator_next(struct fstree_iter *it)
 {
 	struct mount_leaf *current = it->next;
 
-	it->next = __mount_state_iterator_next(it->next, TREE_ITER_DOWN | TREE_ITER_RIGHT);
+	it->next = __fstree_iterator_next(it->next, TREE_ITER_DOWN | TREE_ITER_RIGHT);
 	it->current = current;
 	return current;
 }
 
 void
-mount_state_iterator_skip(struct mount_state_iter *it, struct mount_leaf *leaf)
+fstree_iterator_skip(struct fstree_iter *it, struct mount_leaf *leaf)
 {
 	if (it->current == leaf) {
 		/* Force a move up and then right */
-		it->next = __mount_state_iterator_next(it->current, 0);
+		it->next = __fstree_iterator_next(it->current, 0);
 		it->current = NULL;
 	}
 }
 
 void
-mount_state_iterator_free(struct mount_state_iter *it)
+fstree_iterator_free(struct fstree_iter *it)
 {
 	free(it);
 }

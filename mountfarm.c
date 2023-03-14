@@ -45,7 +45,7 @@ mount_farm_new(const char *farm_root)
 	struct mount_farm *farm;
 
 	farm = calloc(1, sizeof(*farm));
-	farm->tree = mount_state_new();
+	farm->tree = fstree_new();
 
 	(void) fsutil_makedirs(farm_root, 0755);
 
@@ -312,11 +312,11 @@ mount_farm_percolate(struct mount_farm *farm)
 }
 
 struct mount_leaf *
-mount_state_add_export(struct mount_state *state, const char *system_path, unsigned int export_type, struct wormhole_layer *layer)
+fstree_add_export(struct fstree *fstree, const char *system_path, unsigned int export_type, struct wormhole_layer *layer)
 {
 	struct mount_leaf *leaf;
 
-	if (!(leaf = mount_leaf_lookup(state->root, system_path, true)))
+	if (!(leaf = mount_leaf_lookup(fstree->root, system_path, true)))
 		return NULL;
 
 	if (leaf->export_type == WORMHOLE_EXPORT_NONE) {
@@ -338,13 +338,13 @@ mount_state_add_export(struct mount_state *state, const char *system_path, unsig
 struct mount_leaf *
 mount_farm_add_stacked(struct mount_farm *farm, const char *system_path, struct wormhole_layer *layer)
 {
-	return mount_state_add_export(farm->tree, system_path, WORMHOLE_EXPORT_STACKED, layer);
+	return fstree_add_export(farm->tree, system_path, WORMHOLE_EXPORT_STACKED, layer);
 }
 
 struct mount_leaf *
 mount_farm_add_transparent(struct mount_farm *farm, const char *system_path, struct wormhole_layer *layer)
 {
-	return mount_state_add_export(farm->tree, system_path, WORMHOLE_EXPORT_TRANSPARENT, layer);
+	return fstree_add_export(farm->tree, system_path, WORMHOLE_EXPORT_TRANSPARENT, layer);
 }
 
 bool

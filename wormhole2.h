@@ -20,10 +20,10 @@ struct mount_farm {
 
 	unsigned int	num_mounts;
 
-	struct mount_state *tree;
+	struct fstree *tree;
 };
 
-struct mount_state {
+struct fstree {
 	struct mount_leaf *root;
 };
 
@@ -111,24 +111,24 @@ struct wormhole_context {
 	struct fsutil_tempdir	temp;
 };
 
-struct mount_state *		mount_state_new(void);
-extern void			mount_state_free(struct mount_state *state);
-extern struct mount_leaf *	mount_state_create_leaf(struct mount_state *state, const char *relative_path);
-extern bool			mount_state_make_relative(struct mount_state *state,
+struct fstree *		fstree_new(void);
+extern void			fstree_free(struct fstree *fstree);
+extern struct mount_leaf *	fstree_create_leaf(struct fstree *fstree, const char *relative_path);
+extern bool			fstree_make_relative(struct fstree *fstree,
 					const char *common_root);
-extern bool			mount_state_discover(const char *mtab,
+extern bool			fstree_discover(const char *mtab,
 					bool (*report_fn)(void *user_data,
 							const char *mount_point,
 							const char *mnt_type,
 							const char *fsname),
 					void *user_data);
-extern struct mount_leaf *	mount_state_add_export(struct mount_state *state, const char *system_path,
+extern struct mount_leaf *	fstree_add_export(struct fstree *fstree, const char *system_path,
 					unsigned int export_type, struct wormhole_layer *layer);
 
-extern struct mount_state_iter *mount_state_iterator_new(struct mount_state *state);
-extern struct mount_leaf *	mount_state_iterator_next(struct mount_state_iter *);
-extern void			mount_state_iterator_skip(struct mount_state_iter *, struct mount_leaf *);
-extern void			mount_state_iterator_free(struct mount_state_iter *);
+extern struct fstree_iter *fstree_iterator_new(struct fstree *fstree);
+extern struct mount_leaf *	fstree_iterator_next(struct fstree_iter *);
+extern void			fstree_iterator_skip(struct fstree_iter *, struct mount_leaf *);
+extern void			fstree_iterator_free(struct fstree_iter *);
 
 extern struct mount_farm *	mount_farm_new(const char *farm_root);
 extern void			mount_farm_free(struct mount_farm *farm);

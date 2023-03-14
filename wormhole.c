@@ -54,7 +54,7 @@ __mount_farm_discover_callback(void *closure, const char *mount_point,
                                 const char *mnt_type,
                                 const char *fsname)
 {
-	struct mount_state *state = closure;
+	struct fstree *fstree = closure;
 	struct mount_leaf *leaf;
 
 	if (!strcmp(mount_point, "/"))
@@ -65,7 +65,7 @@ __mount_farm_discover_callback(void *closure, const char *mount_point,
 		return true;
 	}
 
-	leaf = mount_state_add_export(state, mount_point, WORMHOLE_EXPORT_TRANSPARENT, NULL);
+	leaf = fstree_add_export(fstree, mount_point, WORMHOLE_EXPORT_TRANSPARENT, NULL);
 	if (leaf == NULL) {
 		log_error("mount_farm_add_transparent(%s) failed\n", mount_point);
 		return false;
@@ -91,20 +91,20 @@ mount_farm_apply_layer(struct mount_farm *farm, struct wormhole_layer *layer)
 static bool
 mount_farm_discover_system_mounts(struct mount_farm *farm)
 {
-	struct mount_state *state = NULL;
-	struct mount_state_iter *it;
+	struct fstree *fstree = NULL;
+	struct fstree_iter *it;
 	struct mount_leaf *leaf;
 
 	trace("Discovering system mounts");
 
-	state = mount_state_new();
-	if (!mount_state_discover(NULL, __mount_farm_discover_callback, state)) {
+	fstree = fstree_new();
+	if (!fstree_discover(NULL, __mount_farm_discover_callback, fstree)) {
 		log_error("Mount state discovery failed\n");
 		return false;
 	}
 
-	it = mount_state_iterator_new(state);
-	while ((leaf = mount_state_iterator_next(it)) != NULL) {
+	it = fstree_iterator_new(fstree);
+	while ((leaf = fstree_iterator_next(it)) != NULL) {
 		struct mount_leaf *new_mount;
 
 		trace("  %s", leaf->relative_path);
@@ -133,8 +133,8 @@ mount_farm_discover_system_mounts(struct mount_farm *farm)
 		}
 	}
 
-	mount_state_iterator_free(it);
-	mount_state_free(state);
+	fstree_iterator_free(it);
+	fstree_free(fstree);
 	return true;
 }
 
@@ -166,13 +166,13 @@ mount_farm_apply_quirks(struct mount_farm *farm)
 static bool
 mount_farm_fill_holes(struct mount_farm *farm)
 {
-	struct mount_state_iter *it;
+	struct fstree_iter *it;
 	struct mount_leaf *leaf;
 	bool okay = true;
 
 	trace("Completing system mounts");
-	it = mount_state_iterator_new(farm->tree);
-	while (okay && (leaf = mount_state_iterator_next(it)) != NULL) {
+	it = fstree_iterator_new(farm->tree);
+	while (okay && (leaf = fstree_iterator_next(it)) != NULL) {
 		/* Just an internal tree node, not a mount */
 		if (leaf->export_type == WORMHOLE_EXPORT_ROOT) {
 			/* It's a static directory at the tree root. Make sure it
@@ -182,7 +182,7 @@ mount_farm_fill_holes(struct mount_farm *farm)
 		}
 	}
 
-	mount_state_iterator_free(it);
+	fstree_iterator_free(it);
 	return true;
 }
 

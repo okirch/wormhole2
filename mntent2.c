@@ -30,7 +30,7 @@
 #include "util.h"
 
 static bool
-__get_mount_state(const char *mtab, const char *root_dir,
+__get_fstree(const char *mtab, const char *root_dir,
 		bool (*report_fn)(void *user_data,
 				const char *mount_point,
 				const char *mnt_type,
@@ -88,14 +88,14 @@ __get_mount_state(const char *mtab, const char *root_dir,
 }
 
 bool
-mount_state_discover(const char *mtab,
+fstree_discover(const char *mtab,
 		bool (*report_fn)(void *user_data,
 				const char *mount_point,
 				const char *mnt_type,
 				const char *fsname),
 		void *user_data)
 {
-	return __get_mount_state(mtab, NULL, report_fn, user_data);
+	return __get_fstree(mtab, NULL, report_fn, user_data);
 }
 
 bool
