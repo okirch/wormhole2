@@ -1587,6 +1587,42 @@ fsutil_inode_compare(const char *path1, const char *path2)
 }
 
 bool
+fsutil_file_content_identical(const char *path1, const char *path2)
+{
+	int fd1 = -1, fd2 = -1;
+	bool verdict = false;
+
+	if ((fd1 = open(path1, O_RDONLY)) < 0)
+		goto out;
+	if ((fd2 = open(path2, O_RDONLY)) < 0)
+		goto out;
+
+	while (true) {
+		char buffer1[8192], buffer2[8192];
+		int count1, count2;
+
+		count1 = read(fd1, buffer1, sizeof(buffer1));
+		count2 = read(fd2, buffer2, sizeof(buffer2));
+		if (count1 == 0 && count2 == 0)
+			break;
+		if (count1 < 0 || count1 != count2)
+			goto out;
+
+		if (memcmp(buffer1, buffer2, count1) != 0)
+			goto out;
+	}
+
+	verdict = true;
+
+out:
+	if (fd1 >= 0)
+		close(fd1);
+	if (fd2 >= 0)
+		close(fd2);
+	return verdict;
+}
+
+bool
 fsutil_mount_overlay(const char *lowerdir, const char *upperdir, const char *workdir, const char *target)
 {
 	char options[3 * PATH_MAX];
@@ -1746,7 +1782,7 @@ fsutil_copy_file(const char *system_path, const char *image_path, const struct s
 		copied += rcount;
 	}
 
-	trace("%s: copied %lu bytes", image_path, copied);
+	trace2("%s -> %s: copied %lu bytes", system_path, image_path, copied);
 	ok = true;
 
 failed:

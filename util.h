@@ -199,5 +199,6 @@ enum {
 };
 
 extern int			fsutil_inode_compare(const char *path1, const char *path2);
+extern bool			fsutil_file_content_identical(const char *path1, const char *path2);
 
 #endif // _WORMHOLE_UTIL_H

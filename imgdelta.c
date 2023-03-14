@@ -37,6 +37,12 @@
 #include "wormhole2.h"
 #include "tracing.h"
 
+#define CMP_TYPE_CHANGED	0x0001
+#define CMP_MODE_CHANGED	0x0002
+#define CMP_CONTENT_CHANGED	0x0004
+#define CMP_OWNER_CHANGED	0x0008
+#define CMP_MTIME_CHANGED	0x0010
+
 static bool		can_chown = false;
 static const char *	default_copydirs[] = {
 	"/bin",
@@ -58,31 +64,42 @@ do_stat(const char *path, struct stat *stb)
 	return stb;
 }
 
-static inline bool
-__attrs_changed(const char *patha, const struct stat *sta, const char *pathb, const struct stat *stb)
+static inline unsigned int
+detect_changes(const char *patha, const struct stat *sta, const char *pathb, const struct stat *stb)
 {
-	bool changed = false;
+	unsigned long mode_xor;
+	int bits_changed = 0;
 
-	if (sta->st_mode != stb->st_mode) {
-		trace("%s: mode changed 0%o -> 0%o", patha, sta->st_mode, stb->st_mode);
-		changed = true;
+	mode_xor = sta->st_mode ^ stb->st_mode;
+	if (mode_xor & S_IFMT) {
+		trace3("%s: file type changed", patha);
+		return ~0; /* type changed, update everything */
+	}
+
+	if (mode_xor != 0) {
+		trace3("%s: mode changed 0%o -> 0%o", patha, sta->st_mode, stb->st_mode);
+		bits_changed |= CMP_MODE_CHANGED;
 	}
 
 	switch (stb->st_mode & S_IFMT) {
 	case S_IFREG:
 		if (sta->st_size != stb->st_size) {
-			trace("%s: size changed %lu -> %lu", patha, (long) sta->st_size, (long) stb->st_size);
-			changed = true;
+			trace3("%s: size changed %lu -> %lu", patha, (long) sta->st_size, (long) stb->st_size);
+			bits_changed |= CMP_CONTENT_CHANGED;
+		} else
+		if (!fsutil_file_content_identical(patha, pathb)) {
+			trace3("%s: file content changed", patha);
+			bits_changed |= CMP_CONTENT_CHANGED;
 		}
 
 		if (sta->st_mtim.tv_sec != stb->st_mtim.tv_sec
 		 || sta->st_mtim.tv_nsec / 1000 != stb->st_mtim.tv_nsec / 1000) {
-			trace("%s: mtime changed %lu.%09lu -> %lu.%09lu", patha,
+			trace3("%s: mtime changed %lu.%09lu -> %lu.%09lu", patha,
 					(long) sta->st_mtim.tv_sec,
 					(long) sta->st_mtim.tv_nsec,
 					(long) stb->st_mtim.tv_sec,
 					(long) stb->st_mtim.tv_nsec);
-			changed = true;
+			bits_changed |= CMP_MTIME_CHANGED;
 		}
 		break;
 
@@ -95,8 +112,8 @@ __attrs_changed(const char *patha, const struct stat *sta, const char *pathb, co
 			 || (lenb = readlink(patha, targeta, sizeof(targeta))) < 0
 			 || lena != lenb
 			 || strncmp(targeta, targetb, lena)) {
-				trace("%s: symlink target changed %s -> %s", patha, targeta, targetb);
-				changed = true;
+				trace3("%s: symlink target changed %s -> %s", patha, targeta, targetb);
+				bits_changed |= CMP_CONTENT_CHANGED;
 			}
 		}
 		break;
@@ -105,15 +122,15 @@ __attrs_changed(const char *patha, const struct stat *sta, const char *pathb, co
 	if (can_chown
 	 && sta->st_uid != stb->st_uid
 	 && sta->st_gid != stb->st_gid) {
-		trace("%s: owner changed from %u:%u -> %u:%u", patha,
+		trace3("%s: owner changed from %u:%u -> %u:%u", patha,
 				(int) sta->st_uid,
 				(int) sta->st_gid,
 				(int) stb->st_uid,
 				(int) stb->st_gid);
-		changed = true;
+		bits_changed |= CMP_OWNER_CHANGED;
 	}
 
-	return changed;
+	return bits_changed;
 }
 
 static bool
@@ -161,12 +178,12 @@ __image_update_attrs(const char *image_path, const struct stat *stb)
 }
 
 static bool
-__image_copy(const char *image_root, const char *src_path, const char *relative_src_path, int dt_type, const struct stat *st)
+__image_copy(const char *image_root, const char *src_path, const char *relative_src_path, int dt_type, const struct stat *st, unsigned int change_hints)
 {
 	const char *image_path;
 	struct stat _stb;
 
-	trace("copy %s -> %s%s", src_path, image_root, relative_src_path);
+	trace3("copy %s -> %s%s", src_path, image_root, relative_src_path);
 	if (st == NULL && !(st = do_stat(src_path, &_stb)))
 		return false;
 
@@ -179,9 +196,11 @@ __image_copy(const char *image_root, const char *src_path, const char *relative_
 		}
 	} else
 	if (dt_type == DT_REG) {
-		trace2("copy regular file %s", image_path);
-		if (!fsutil_copy_file(src_path, image_path, st))
-			return false;
+		if (change_hints & CMP_CONTENT_CHANGED) {
+			trace2("copy regular file %s", image_path);
+			if (!fsutil_copy_file(src_path, image_path, st))
+				return false;
+		}
 	} else
 	if (dt_type == DT_LNK) {
 		char target[PATH_MAX + 1];
@@ -202,12 +221,14 @@ __image_copy(const char *image_root, const char *src_path, const char *relative_
 		}
 	} else
 	if (dt_type == DT_CHR || dt_type == DT_BLK) {
+		trace2("create device %s", image_path);
 		if (mknod(image_path, st->st_mode, st->st_rdev) < 0) {
 			log_error("%s: unable to create device node: %m", image_path);
 			return false;
 		}
 	} else
 	if (dt_type == DT_FIFO) {
+		trace2("create sock %s", image_path);
 		if (mkfifo(image_path, st->st_mode) < 0) {
 			log_error("%s: unable to create FIFO: %m", image_path);
 			return false;
@@ -225,30 +246,50 @@ __image_copy(const char *image_root, const char *src_path, const char *relative_
 }
 
 static bool
-image_copy(const char *image_root, struct fsutil_ftw_cursor *cursor, const struct stat *st)
+image_copy(const char *image_root, struct fsutil_ftw_cursor *cursor)
 {
+	const struct stat *st;
+	struct stat stb;
+
 	assert(cursor);
-	return __image_copy(image_root, cursor->path, cursor->relative_path, cursor->d->d_type, st);
+	if ((st = cursor->st) == NULL) {
+		if (lstat(cursor->path, &stb) < 0) {
+			log_error("cannot stat %s: %m", cursor->path);
+			return false;
+		}
+		st = &stb;
+	}
+
+	return __image_copy(image_root, cursor->path, cursor->relative_path, cursor->d->d_type, st, ~0);
 }
 
 static bool
-image_compare_copy(const char *image_root, struct fsutil_ftw_cursor *cursor)
+image_compare_copy(struct imgdelta_config *cfg, const char *image_root, struct fsutil_ftw_cursor *cursor)
 {
 	const char *image_path;
-	struct stat system_stb, image_stb;
+	struct stat image_stb;
+	unsigned int bits_changed;
 
-	if (!do_stat(cursor->path, &system_stb))
-		return false;
+	assert(cursor && cursor->st);
 
 	image_path = __fsutil_concat2(image_root, cursor->path);
-	if (do_stat(image_path, &image_stb)
-	 && !__attrs_changed(cursor->path, &system_stb, image_path, &image_stb)) {
-		trace3("%s: unchanged", cursor->path);
-		return true;
+	if (do_stat(image_path, &image_stb)) {
+		bits_changed = detect_changes(cursor->path, cursor->st, image_path, &image_stb);
+		bits_changed &= ~(cfg->ignore_change_mask);
+		if (bits_changed == 0) {
+			trace3("%s: unchanged", cursor->path);
+			return true;
+		}
 	}
 
-	trace("%s: needs an update", cursor->path);
-	return image_copy(image_root, cursor, &system_stb);
+	trace("update %c%c%c%c%c %s",
+			(bits_changed & CMP_TYPE_CHANGED)? 'X' : '-',
+			(bits_changed & CMP_MODE_CHANGED)? 'M' : '-',
+			(bits_changed & CMP_CONTENT_CHANGED)? 'C' : '-',
+			(bits_changed & CMP_OWNER_CHANGED)? 'O' : '-',
+			(bits_changed & CMP_MTIME_CHANGED)? 'T' : '-',
+			cursor->path);
+	return __image_copy(image_root, cursor->path, cursor->relative_path, cursor->d->d_type, cursor->st, bits_changed);
 }
 
 static bool
@@ -296,7 +337,7 @@ copy_recursively(const char *src_path, const char *dst_path)
 	if (!fsutil_makedirs(dst_path, 0755))
 		return false;
 
-        ctx = fsutil_ftw_open("/", 0, src_path);
+	ctx = fsutil_ftw_open("/", FSUTIL_FTW_NEED_STAT, src_path);
 	if (mkdir(dst_path, 0755) < 0 && errno != EEXIST) {
 		log_error("%s: cannot create directory: %m", dst_path);
 		return false;
@@ -306,7 +347,7 @@ copy_recursively(const char *src_path, const char *dst_path)
 		char dst[PATH_MAX];
 
 		snprintf(dst, sizeof(dst), "%s/%s", dst_path, cursor.relative_path);
-		ok = image_copy(dst_path, &cursor, NULL) && ok;
+		ok = image_copy(dst_path, &cursor) && ok;
         }
 
 	fsutil_ftw_ctx_free(ctx);
@@ -337,7 +378,7 @@ update_image_partial(struct imgdelta_config *cfg, const char *image_root, const 
 			goto failed;
 
 		dt_type = __fsutil_get_dtype(&stb);
-		if (!__image_copy(image_root, dir_path, dir_path, dt_type, &stb))
+		if (!__image_copy(image_root, dir_path, dir_path, dt_type, &stb, ~0))
 			goto failed;
 
 		if (!S_ISDIR(stb.st_mode))
@@ -373,13 +414,13 @@ update_image_partial(struct imgdelta_config *cfg, const char *image_root, const 
 		trace3("%s vs %s", system_cursor.path, image_cursor.path);
 		r = strcmp(system_cursor.path, image_cursor.relative_path);
 		if (r == 0) {
-			ok = image_compare_copy(image_root, &system_cursor) && ok;
+			ok = image_compare_copy(cfg, image_root, &system_cursor) && ok;
 			system_cursor.d = NULL;
 			image_cursor.d = NULL;
 		} else
 		if (r < 0) {
 			trace("%s: added to system", system_cursor.path);
-			ok = image_copy(image_root, &system_cursor, NULL) && ok;
+			ok = image_copy(image_root, &system_cursor) && ok;
 			system_cursor.d = NULL;
 		} else {
 			trace("%s: removed from system", image_cursor.relative_path);
@@ -391,7 +432,7 @@ update_image_partial(struct imgdelta_config *cfg, const char *image_root, const 
 
 	while (system_cursor.d) {
 		trace("%s: added to system", system_cursor.path);
-		ok = image_copy(image_root, &system_cursor, NULL) && ok;
+		ok = image_copy(image_root, &system_cursor) && ok;
 		fsutil_ftw_next(system_ctx, &system_cursor);
 	}
 
@@ -616,17 +657,42 @@ write_layer_config(struct imgdelta_config *cfg)
 }
 
 static struct option	long_options[] = {
-	{ "create-base-layer",
-			no_argument,		NULL,	'B'		},
-	{ "config",	required_argument,	NULL,	'c'		},
-	{ "copy",	required_argument,	NULL,	'C'		},
-	{ "exclude",	required_argument,	NULL,	'X'		},
-	{ "use-layer",	required_argument,	NULL,	'L'		},
-	{ "force",	no_argument,		NULL,	'f'		},
-	{ "debug",	no_argument,		NULL,	'd'		},
+	{ "create-base-layer",	no_argument,		NULL,	'B'		},
+	{ "config",		required_argument,	NULL,	'c'		},
+	{ "copy",		required_argument,	NULL,	'C'		},
+	{ "exclude",		required_argument,	NULL,	'X'		},
+	{ "use-layer",		required_argument,	NULL,	'L'		},
+	{ "force",		no_argument,		NULL,	'f'		},
+	{ "debug",		no_argument,		NULL,	'd'		},
+	{ "ignore-change",	required_argument,	NULL,	'I'		},
 
 	{ NULL },
 };
+
+static bool
+config_set_ignore_changes(struct imgdelta_config *cfg, const char *ignore_string)
+{
+	char *copy, *s;
+
+	copy = strdup(ignore_string);
+	for (s = strtok(copy, ","); s; s = strtok(NULL, ",")) {
+		if (!strcmp(optarg, "mtime")) {
+			cfg->ignore_change_mask |= CMP_MTIME_CHANGED;
+		} else
+		if (!strcmp(optarg, "owner")) {
+			cfg->ignore_change_mask |= CMP_OWNER_CHANGED;
+		} else
+		if (!strcmp(optarg, "mode")) {
+			cfg->ignore_change_mask |= CMP_MODE_CHANGED;
+		} else {
+			return false;
+		}
+	}
+
+	free(copy);
+	return true;
+}
+
 
 static bool
 read_config(struct imgdelta_config *cfg, const char *filename)
@@ -687,6 +753,10 @@ read_config(struct imgdelta_config *cfg, const char *filename)
 			}
 
 			strutil_array_append(&cfg->entry_points, value);
+		} else
+		if (!strcmp(kwd, "ignore-change")) {
+			if (!config_set_ignore_changes(cfg, value))
+				goto done;
 		} else {
 			log_error("%s:%u: unknown keyword \"%s\"", filename, lineno, kwd);
 			goto done;
@@ -728,6 +798,13 @@ main(int argc, char **argv)
 
 		case 'L':
 			strutil_array_append(&config.layers_used, optarg);
+			break;
+
+		case 'I':
+			if (!config_set_ignore_changes(&config, optarg)) {
+				log_error("Unknown value \"%s\" to --ignore-change option", optarg);
+				return 1;
+			}
 			break;
 
 		case 'X':

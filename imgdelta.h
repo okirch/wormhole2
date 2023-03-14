@@ -28,6 +28,7 @@ struct imgdelta_config {
 	unsigned int		debug;
 	bool			force;
 	bool			create_base_layer;
+	unsigned int		ignore_change_mask;
 
 	struct wormhole_layer *	layer;
 
