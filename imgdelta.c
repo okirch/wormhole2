@@ -47,17 +47,6 @@ static const char *	default_copydirs[] = {
 	NULL,
 };
 
-bool
-__mount_bind(const char *src, const char *dst, int extra_flags)
-{
-	trace("Binding %s to %s\n", src, dst);
-	if (mount(src, dst, NULL, MS_BIND | extra_flags, NULL) < 0) {
-		log_error("Unable to bind mount %s on %s: %m\n", src, dst);
-		return false;
-	}
-	return true;
-}
-
 static const struct stat *
 do_stat(const char *path, struct stat *stb)
 {
