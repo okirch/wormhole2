@@ -241,7 +241,7 @@ __mount_farm_percolate(struct mount_leaf *node, struct mount_leaf *closest_ances
 		for (i = 0; i < node->attached_layers.count; ++i) {
 			struct wormhole_layer *layer = node->attached_layers.data[i];
 
-			wormhole_layer_array_append(&closest_ancestor->attached_layers, layer);
+			wormhole_layer_array_append_unique(&closest_ancestor->attached_layers, layer);
 		}
 		wormhole_layer_array_destroy(&node->attached_layers);
 		node->export_type = WORMHOLE_EXPORT_NONE;

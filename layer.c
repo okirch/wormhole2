@@ -89,6 +89,20 @@ wormhole_layer_array_append(struct wormhole_layer_array *a, struct wormhole_laye
 	a->data[a->count++] = wormhole_layer_hold(layer);
 }
 
+void
+wormhole_layer_array_append_unique(struct wormhole_layer_array *a, struct wormhole_layer *layer)
+{
+	unsigned int i;
+
+	for (i = 0; i < a->count; ++i) {
+		if (a->data[i] == layer)
+			return;
+	}
+
+	wormhole_layer_array_append(a, layer);
+}
+
+
 struct wormhole_layer *
 wormhole_layer_array_find(struct wormhole_layer_array *a, const char *name)
 {
