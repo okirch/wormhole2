@@ -433,9 +433,9 @@ __fstree_node_print(const struct fstree_node *node)
 }
 
 void
-mount_tree_print(struct fstree_node *node)
+fstree_print(struct fstree *tree)
 {
-	fstree_node_traverse(node, __fstree_node_print);
+	fstree_node_traverse(tree->root, __fstree_node_print);
 }
 
 /*

@@ -76,7 +76,7 @@ mount_farm_free(struct mount_farm *farm)
 void
 mount_farm_print_tree(struct mount_farm *farm)
 {
-	mount_tree_print(farm->tree->root);
+	fstree_print(farm->tree);
 }
 
 bool

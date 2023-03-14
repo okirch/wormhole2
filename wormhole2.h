@@ -124,6 +124,7 @@ extern bool			fstree_discover(const char *mtab,
 					void *user_data);
 extern struct fstree_node *	fstree_add_export(struct fstree *fstree, const char *system_path,
 					unsigned int export_type, struct wormhole_layer *layer);
+extern void			fstree_print(struct fstree *tree);
 
 extern struct fstree_iter *	fstree_iterator_new(struct fstree *fstree);
 extern struct fstree_node *	fstree_iterator_next(struct fstree_iter *);
@@ -160,7 +161,6 @@ extern void			fstree_node_invalidate(struct fstree_node *leaf);
 extern bool			fstree_node_zap_dirs(struct fstree_node *leaf);
 extern bool			fstree_node_mount(const struct fstree_node *leaf);
 extern bool			fstree_node_traverse(struct fstree_node *node, bool (*visitorfn)(const struct fstree_node *));
-extern void			mount_tree_print(struct fstree_node *leaf);
 extern const char *		mount_export_type_as_string(int export_type);
 
 extern struct wormhole_layer *	wormhole_layer_new(const char *name, const char *path, unsigned int depth);

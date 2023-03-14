@@ -157,7 +157,7 @@ mount_farm_apply_quirks(struct mount_farm *farm)
 	fstree_node_set_fstype(node, "tmpfs", farm);
 
 	trace("Assembled tree:");
-	mount_tree_print(farm->tree->root);
+	fstree_print(farm->tree);
 	trace("---");
 
 	return true;
