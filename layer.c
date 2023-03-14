@@ -324,10 +324,36 @@ failed:
 }
 
 bool
-wormhole_layers_resolve(struct wormhole_layer_array *a, const char *name, const char *remount_image_base)
+wormhole_layers_resolve(struct wormhole_layer_array *layers, const struct strutil_array *names, const char *remount_image_base)
 {
-	return __wormhole_layers_resolve(a, name, 0, remount_image_base);
+	unsigned int i;
+
+	trace("%s()", __func__);
+	for (i = 0; i < names->count; ++i) {
+		const char *name = names->data[i];
+
+		if (!__wormhole_layers_resolve(layers, name, 0, remount_image_base))
+			return false;
+	}
+
+	if (layers->count == 0 || !layers->data[0]->is_root) {
+		log_error("Refusing to run without a root layer");
+		return false;
+	}
+
+	for (i = 1; i < layers->count; ++i) {
+		if (layers->data[i]->is_root) {
+			log_error("Misconfiguration - cannot run with two different root layers (%s and %s)",
+					layers->data[0]->name,
+					layers->data[i]->name);
+			return false;
+		}
+	}
+
+	trace("configured %u layers", layers->count);
+	return true;
 }
+
 
 bool
 wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct mount_leaf *tree)

@@ -446,14 +446,11 @@ update_image_work(struct imgdelta_config *cfg, const char *tpath)
 		strutil_array_append(&cfg->layer_images, empty);
 	} else {
 		struct wormhole_layer_array resolved = { 0 };
+		/* FIXME: remount layers to shorten the path names? */
+		const char *remount_image_base = NULL; 
 
-		for (i = 0; i < cfg->layers_used.count; ++i) {
-			const char *layer_name = cfg->layers_used.data[i];
-
-			/* FIXME: remount the layer to a shorter path? */
-			if (!wormhole_layers_resolve(&resolved, layer_name, NULL))
-				return 1;
-		}
+		if (!wormhole_layers_resolve(&resolved, &cfg->layers_used, remount_image_base))
+			return 1;
 
 		for (i = 0; i < resolved.count; ++i)
 			strutil_array_append(&cfg->layer_images, resolved.data[i]->image_path);

@@ -177,6 +177,6 @@ extern void			wormhole_layer_array_destroy(struct wormhole_layer_array *a);
 
 extern bool			wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct mount_leaf *tree);
 extern bool			wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm *farm);
-extern bool			wormhole_layers_resolve(struct wormhole_layer_array *a, const char *name, const char *remount_image_base);
+extern bool			wormhole_layers_resolve(struct wormhole_layer_array *layers, const struct strutil_array *names, const char *remount_image_base);
 
 #endif /* WORMHOLE2_H */

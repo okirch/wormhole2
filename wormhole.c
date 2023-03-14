@@ -361,71 +361,9 @@ wormhole_context_set_build(struct wormhole_context *ctx, const char *name, const
 }
 
 static bool
-__wormhole_context_resolve_layer(struct wormhole_context *ctx, const char *name, unsigned int depth)
-{
-	struct wormhole_layer *layer = NULL;
-	bool okay = false;
-	unsigned int i;
-
-	if (depth > 100) {
-		log_error("too many nested layers, possibly a circular reference");
-		return false;
-	}
-
-	if (wormhole_layer_array_find(&ctx->layers, name))
-		return true;
-
-	layer = wormhole_layer_new(name, NULL, depth);
-	if (!wormhole_layer_remount_image(layer, ctx->image_path))
-		goto failed;
-
-	if (!wormhole_layer_load_config(layer))
-		goto failed;
-
-	/* Now resolve the lower layers referenced by this one */
-	for (i = 0; i < layer->used.count; ++i) {
-		if (!__wormhole_context_resolve_layer(ctx, layer->used.data[i], depth + 1))
-			goto failed;
-	}
-
-	wormhole_layer_array_append(&ctx->layers, layer);
-	okay = true;
-
-failed:
-	if (layer)
-		wormhole_layer_release(layer);
-	return okay;
-}
-
-static bool
 wormhole_context_resolve_layers(struct wormhole_context *ctx)
 {
-	unsigned int i;
-
-	trace("%s()", __func__);
-	for (i = 0; i < ctx->layer_names.count; ++i) {
-		const char *name = ctx->layer_names.data[i];
-
-		if (!__wormhole_context_resolve_layer(ctx, name, 0))
-			return false;
-	}
-
-	if (ctx->layers.count == 0 || !ctx->layers.data[0]->is_root) {
-		log_error("Refusing to run without a root layer");
-		return false;
-	}
-
-	for (i = 1; i < ctx->layers.count; ++i) {
-		if (ctx->layers.data[i]->is_root) {
-			log_error("Misconfiguration - cannot run with two different root layers (%s and %s)",
-					ctx->layers.data[0]->name,
-					ctx->layers.data[i]->name);
-			return false;
-		}
-	}
-
-	trace("configured %u layers", ctx->layers.count);
-	return true;
+	return wormhole_layers_resolve(&ctx->layers, &ctx->layer_names, ctx->image_path);
 }
 
 bool
