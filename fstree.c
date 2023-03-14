@@ -280,6 +280,11 @@ mount_leaf_build_lowerspec(const struct mount_leaf *leaf)
 		strutil_array_append(&dirs, __fsutil_concat2(layer->image_path, leaf->relative_path));
 	}
 
+	if (dirs.count == 0) {
+		log_error("Cannot build lowerdir spec for %s: no directories given", leaf->relative_path);
+		return NULL;
+	}
+
 	result = strutil_array_join(&dirs, ":");
 	strutil_array_destroy(&dirs);
 
@@ -328,7 +333,7 @@ mount_leaf_mount(const struct mount_leaf *leaf)
 	}
 
 	if (leaf->dtype >= 0 && leaf->dtype != DT_REG && leaf->dtype != DT_LNK)
-		log_warning("%s is not a relative file; building an overlay will probably fail", leaf->relative_path);
+		log_warning("%s is not a regular file; building an overlay will probably fail", leaf->relative_path);
 
 	if (!(lowerspec = mount_leaf_build_lowerspec(leaf)))
 		return false;
