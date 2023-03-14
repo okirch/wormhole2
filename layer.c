@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <assert.h>
 
 #include "wormhole2.h"
 #include "paths.h"
@@ -34,6 +35,7 @@ wormhole_layer_new(const char *name, const char *path, unsigned int depth)
 	struct wormhole_layer *layer;
 
 	layer = calloc(1, sizeof(*layer));
+	layer->refcount = 1;
 	layer->name = strdup(name);
 	layer->depth = depth;
 	if (path)
@@ -48,9 +50,10 @@ wormhole_layer_new(const char *name, const char *path, unsigned int depth)
 	return layer;
 }
 
-void
+static void
 wormhole_layer_free(struct wormhole_layer *layer)
 {
+	assert(layer->refcount == 0);
 	strutil_set(&layer->name, NULL);
 	strutil_set(&layer->path, NULL);
 	strutil_set(&layer->image_path, NULL);
@@ -60,6 +63,22 @@ wormhole_layer_free(struct wormhole_layer *layer)
 	free(layer);
 }
 
+struct wormhole_layer *
+wormhole_layer_hold(struct wormhole_layer *layer)
+{
+	assert(layer->refcount);
+	layer->refcount += 1;
+	return layer;
+}
+
+void
+wormhole_layer_release(struct wormhole_layer *layer)
+{
+	assert(layer->refcount);
+	if (--(layer->refcount) == 0)
+		wormhole_layer_free(layer);
+}
+
 void
 wormhole_layer_array_append(struct wormhole_layer_array *a, struct wormhole_layer *layer)
 {
@@ -67,7 +86,7 @@ wormhole_layer_array_append(struct wormhole_layer_array *a, struct wormhole_laye
 		a->data = realloc(a->data, (a->count + 16) * sizeof(a->data[0]));
 	}
 
-	a->data[a->count++] = layer;
+	a->data[a->count++] = wormhole_layer_hold(layer);
 }
 
 struct wormhole_layer *
@@ -91,7 +110,7 @@ wormhole_layer_array_destroy(struct wormhole_layer_array *a)
 	unsigned int i;
 
 	for (i = 0; i < a->count; ++i)
-		wormhole_layer_free(a->data[i]);
+		wormhole_layer_release(a->data[i]);
 
 	if (a->data)
 		free(a->data);
@@ -253,9 +272,10 @@ wormhole_layer_remount_image(struct wormhole_layer *layer, const char *image_bas
  * For a given layer, find the layers it requires and load them
  */
 static bool
-__wormhole_layers_resolve(struct wormhole_layer_array *layers, const char *name, unsigned int depth)
+__wormhole_layers_resolve(struct wormhole_layer_array *layers, const char *name, unsigned int depth, const char *remount_image_base)
 {
 	struct wormhole_layer *layer = NULL;
+	bool okay = false;
 	unsigned int i;
 
 	if (depth > 100) {
@@ -268,28 +288,31 @@ __wormhole_layers_resolve(struct wormhole_layer_array *layers, const char *name,
 
 	layer = wormhole_layer_new(name, NULL, depth);
 
+	if (remount_image_base && !wormhole_layer_remount_image(layer, remount_image_base))
+		goto failed;
+
 	if (!wormhole_layer_load_config(layer))
 		goto failed;
 
 	/* Now resolve the lower layers referenced by this one */
 	for (i = 0; i < layer->used.count; ++i) {
-		if (!__wormhole_layers_resolve(layers, layer->used.data[i], depth + 1))
+		if (!__wormhole_layers_resolve(layers, layer->used.data[i], depth + 1, remount_image_base))
 			goto failed;
 	}
 
 	wormhole_layer_array_append(layers, layer);
-	return true;
+	okay = true;
 
 failed:
 	if (layer)
-		wormhole_layer_free(layer);
-	return false;
+		wormhole_layer_release(layer);
+	return okay;
 }
 
 bool
-wormhole_layers_resolve(struct wormhole_layer_array *a, const char *name)
+wormhole_layers_resolve(struct wormhole_layer_array *a, const char *name, const char *remount_image_base)
 {
-	return __wormhole_layers_resolve(a, name, 0);
+	return __wormhole_layers_resolve(a, name, 0, remount_image_base);
 }
 
 bool

@@ -66,6 +66,8 @@ struct mount_leaf {
 #define LOWER_LAYERS_MAX	8
 
 struct wormhole_layer {
+	unsigned int		refcount;
+
 	char *			name;
 	char *			path;
 	char *			config_path;
@@ -159,7 +161,8 @@ extern void			mount_tree_print(struct mount_leaf *leaf);
 extern const char *		mount_export_type_as_string(int export_type);
 
 extern struct wormhole_layer *	wormhole_layer_new(const char *name, const char *path, unsigned int depth);
-extern void			wormhole_layer_free(struct wormhole_layer *layer);
+extern struct wormhole_layer *	wormhole_layer_hold(struct wormhole_layer *layer);
+extern void			wormhole_layer_release(struct wormhole_layer *layer);
 extern bool			wormhole_layer_load_config(struct wormhole_layer *layer);
 extern bool			wormhole_layer_save_config(struct wormhole_layer *layer);
 extern bool			wormhole_layer_remount_image(struct wormhole_layer *layer, const char *image_base);
@@ -170,6 +173,6 @@ extern void			wormhole_layer_array_destroy(struct wormhole_layer_array *a);
 
 extern bool			wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct mount_leaf *tree);
 extern bool			wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm *farm);
-extern bool			wormhole_layers_resolve(struct wormhole_layer_array *a, const char *name);
+extern bool			wormhole_layers_resolve(struct wormhole_layer_array *a, const char *name, const char *remount_image_base);
 
 #endif /* WORMHOLE2_H */

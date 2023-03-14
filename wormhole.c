@@ -364,6 +364,7 @@ static bool
 __wormhole_context_resolve_layer(struct wormhole_context *ctx, const char *name, unsigned int depth)
 {
 	struct wormhole_layer *layer = NULL;
+	bool okay = false;
 	unsigned int i;
 
 	if (depth > 100) {
@@ -388,12 +389,12 @@ __wormhole_context_resolve_layer(struct wormhole_context *ctx, const char *name,
 	}
 
 	wormhole_layer_array_append(&ctx->layers, layer);
-	return true;
+	okay = true;
 
 failed:
 	if (layer)
-		wormhole_layer_free(layer);
-	return false;
+		wormhole_layer_release(layer);
+	return okay;
 }
 
 static bool

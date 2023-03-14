@@ -509,7 +509,8 @@ update_image_work(struct imgdelta_config *cfg, const char *tpath)
 		for (i = 0; i < cfg->layers_used.count; ++i) {
 			const char *layer_name = cfg->layers_used.data[i];
 
-			if (!wormhole_layers_resolve(&resolved, layer_name))
+			/* FIXME: remount the layer to a shorter path? */
+			if (!wormhole_layers_resolve(&resolved, layer_name, NULL))
 				return 1;
 		}
 
