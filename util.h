@@ -62,6 +62,7 @@ extern bool			procutil_command_exec(struct procutil_command *cmd, const char *ar
 
 extern bool			wormhole_create_namespace(void);
 extern bool			wormhole_create_user_namespace(bool as_root);
+extern bool			wormhole_create_init_namespace(void);
 
 extern void			fsutil_tempdir_init(struct fsutil_tempdir *td);
 extern char *			fsutil_tempdir_path(struct fsutil_tempdir *td);

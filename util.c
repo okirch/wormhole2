@@ -420,6 +420,17 @@ wormhole_create_user_namespace(bool as_root)
 	return true;
 }
 
+bool
+wormhole_create_init_namespace(void)
+{
+	if (unshare(CLONE_NEWNS|CLONE_NEWPID|CLONE_NEWUTS) < 0) {
+		log_error("unshare() failed: %m");
+		return false;
+	}
+
+	return true;
+}
+
 /*
  * Reap exited children
  */

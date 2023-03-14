@@ -250,6 +250,7 @@ enum {
 	PURPOSE_NONE,
 	PURPOSE_BUILD,
 	PURPOSE_USE,
+	PURPOSE_BOOT,
 
 	__PURPOSE_MESSING_AROUND,
 };
@@ -342,13 +343,22 @@ failed:
 	return NULL;
 }
 
+/*
+ * Set up the wormhole context for a specific purpose
+ */
+static inline void
+wormhole_context_set_purpose(struct wormhole_context *ctx, unsigned int purpose)
+{
+	if (ctx->purpose != PURPOSE_NONE && ctx->purpose != purpose)
+		log_fatal("Conflicting purposes for this wormhole\n");
+
+	ctx->purpose = purpose;
+}
+
 void
 wormhole_context_set_build(struct wormhole_context *ctx, const char *name)
 {
-	if (ctx->purpose != PURPOSE_NONE)
-		log_fatal("Conflicting purposes for this wormhole\n");
-
-	ctx->purpose = PURPOSE_BUILD;
+	wormhole_context_set_purpose(ctx, PURPOSE_BUILD);
 	strutil_set(&ctx->build_target, name);
 
 	/* Set the default build root */
@@ -357,6 +367,13 @@ wormhole_context_set_build(struct wormhole_context *ctx, const char *name)
 		if (ctx->build_root == NULL)
 			log_fatal("Cannot set build root to $PWD/wormhole-build");
 	}
+}
+
+void
+wormhole_context_set_boot(struct wormhole_context *ctx, const char *name)
+{
+	wormhole_context_set_purpose(ctx, PURPOSE_BOOT);
+	strutil_set(&ctx->boot_device, name);
 }
 
 static bool
@@ -524,9 +541,13 @@ wormhole_context_perform_in_container(struct wormhole_context *ctx, int (*fn)(st
 	int status;
 	pid_t pid;
 
-	pid = fork();
-	if (pid < 0)
-		log_fatal("Unable to fork: %m");
+	if (nofork) {
+		pid = 0;
+	} else {
+		pid = fork();
+		if (pid < 0)
+			log_fatal("Unable to fork: %m");
+	}
 
 	if (pid == 0) {
 		int exit_status;
@@ -554,6 +575,69 @@ wormhole_context_perform_in_container(struct wormhole_context *ctx, int (*fn)(st
 
 	trace("Container sub-process exited with status %d", ctx->exit_status);
 	return true;
+}
+
+static int
+__perform_boot(struct wormhole_context *ctx)
+{
+	static const char *default_fstypes[] = {
+		"btrfs", "ext4", "xfs", NULL,
+	};
+
+	ctx->exit_status = 100;
+
+	if (!wormhole_context_detach(ctx))
+		goto out;
+
+	/* make sure there's a tmpfs at /tmp */
+	if (!fsutil_mount_tmpfs("/tmp"))
+		goto out;
+
+	if (!fsutil_makedirs("/tmp/root", 0755))
+		goto out;
+
+	ctx->farm = mount_farm_new("/tmp/unused");
+	if (ctx->boot_fstype) {
+		if (mount(ctx->boot_device, "/tmp/root", ctx->boot_fstype, 0, NULL) < 0) {
+			log_error("Cannot mount %s file system on %s: %m", ctx->boot_fstype, ctx->boot_device);
+			goto out;
+		}
+		strutil_set(&ctx->farm->chroot, "/tmp/root");
+	} else {
+		const char **next, *fstype;
+
+		for (next = default_fstypes; (fstype = *next++) != NULL; ) {
+			if (mount(ctx->boot_device, "/tmp/root", fstype, 0, NULL) >= 0) {
+				trace("Successfully mounted %s using %s", ctx->boot_device, fstype);
+				strutil_set(&ctx->farm->chroot, "/tmp/root");
+				break;
+			}
+
+			trace("Failed to mount %s file system on %s: %m", fstype, ctx->boot_device);
+		}
+	}
+
+	trace("chroot=%s", ctx->farm->chroot);
+	if (ctx->farm->chroot == NULL) {
+		log_error("No root file system found");
+		goto out;
+	}
+
+	if (!wormhole_context_switch_root(ctx))
+		goto out;
+
+	if (ctx->command.argv == NULL) {
+		char *argv_init[] = {
+			"/bin/init", NULL
+		};
+		procutil_command_init(&ctx->command, argv_init);
+	}
+
+	procutil_command_exec(&ctx->command, ctx->command.argv[0]);
+	log_error("Failed to execute init process");
+
+out:
+	return ctx->exit_status;
 }
 
 static int
@@ -727,6 +811,26 @@ do_build(struct wormhole_context *ctx)
 	ctx->exit_status = 0;
 }
 
+static void
+do_boot(struct wormhole_context *ctx)
+{
+	if (!ctx->use_privileged_namespace) {
+		log_error("Currently, you must be root to build wormhole layers\n");
+		return;
+	}
+
+	if (ctx->layer_names.count) {
+		log_error("You cannot specify layers while using the --boot option");
+		return;
+	}
+
+	trace("Booting OS");
+	if (!wormhole_context_perform_in_container(ctx, __perform_boot, true))
+		return;
+
+	ctx->exit_status = 0;
+}
+
 static int
 __run_container(struct wormhole_context *ctx)
 {
@@ -757,11 +861,13 @@ do_run(struct wormhole_context *ctx)
 
 enum {
 	OPT_RPMDB = 256,
+	OPT_BOOT,
 };
 
 static struct option	long_options[] = {
 	{ "debug",	no_argument,		NULL,	'd'		},
 	{ "build",	required_argument,	NULL,	'B'		},
+	{ "boot",	required_argument,	NULL,	OPT_BOOT	},
 	{ "buildroot",	required_argument,	NULL,	'R'		},
 	{ "use",	required_argument,	NULL,	'u'		},
 	{ "layer",	required_argument,	NULL,	'L'		},
@@ -783,6 +889,10 @@ main(int argc, char **argv)
 		switch (c) {
 		case 'B':
 			wormhole_context_set_build(ctx, optarg);
+			break;
+
+		case OPT_BOOT:
+			wormhole_context_set_boot(ctx, optarg);
 			break;
 
 		case 'd':
@@ -808,25 +918,30 @@ main(int argc, char **argv)
 		}
 	}
 
-	if (optind >= argc)
-		log_fatal("Missing command to be executed\n");
-
 	trace("debug level set to %u\n", tracing_level);
+
+	if (optind < argc)
+		wormhole_context_set_command(ctx, argv + optind);
+	else
+	if (ctx->purpose == PURPOSE_BUILD || ctx->purpose == PURPOSE_USE)
+		log_fatal("Missing command to be executed\n");
 
 	if (!fsutil_dir_is_mountpoint("/")) {
 		log_warning("Running inside what looks like a chroot environment.");
 		wormhole_in_chroot = true;
 	}
 
-	wormhole_context_set_command(ctx, argv + optind);
-
 	switch (ctx->purpose) {
 	case PURPOSE_BUILD:
 		do_build(ctx);
 		break;
 
+	case PURPOSE_BOOT:
+		do_boot(ctx);
+		break;
+
 	case PURPOSE_NONE:
-		ctx->purpose = PURPOSE_USE;
+		wormhole_context_set_purpose(ctx, PURPOSE_USE);
 		/* fallthru */
 
 	case PURPOSE_USE:

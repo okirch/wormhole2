@@ -100,8 +100,13 @@ struct wormhole_context {
 	struct strutil_array	layer_names;
 	struct wormhole_layer_array layers;
 
+	/* PURPOSE_BUILD */
 	char *			build_target;
 	char *			build_root;
+
+	/* PURPOSE_BOOT */
+	char *			boot_device;
+	char *			boot_fstype;
 
 	struct mount_farm *	farm;
 
