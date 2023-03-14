@@ -343,7 +343,7 @@ failed:
 }
 
 void
-wormhole_context_set_build(struct wormhole_context *ctx, const char *name, const char *build_root)
+wormhole_context_set_build(struct wormhole_context *ctx, const char *name)
 {
 	if (ctx->purpose != PURPOSE_NONE)
 		log_fatal("Conflicting purposes for this wormhole\n");
@@ -351,37 +351,18 @@ wormhole_context_set_build(struct wormhole_context *ctx, const char *name, const
 	ctx->purpose = PURPOSE_BUILD;
 	strutil_set(&ctx->build_target, name);
 
-	if (build_root)
-		strutil_set(&ctx->build_root, build_root);
-	else
+	/* Set the default build root */
+	if (ctx->build_root == NULL) {
 		strutil_set(&ctx->build_root, fsutil_makedir2(get_current_dir_name(), "wormhole-build"));
-
-	if (ctx->build_root == NULL)
-		log_fatal("Cannot set build root to $PWD/wormhole-build");
+		if (ctx->build_root == NULL)
+			log_fatal("Cannot set build root to $PWD/wormhole-build");
+	}
 }
 
 static bool
 wormhole_context_resolve_layers(struct wormhole_context *ctx)
 {
 	return wormhole_layers_resolve(&ctx->layers, &ctx->layer_names, ctx->image_path);
-}
-
-bool
-wormhole_context_use_layer(struct wormhole_context *ctx, const char *name)
-{
-	strutil_array_append(&ctx->layer_names, name);
-	return true;
-}
-
-bool
-wormhole_context_use_layers(struct wormhole_context *ctx, unsigned int count, const char **names)
-{
-	while (count--) {
-		if (!wormhole_context_use_layer(ctx, *names++))
-			return false;
-	}
-
-	return true;
 }
 
 void
@@ -792,39 +773,33 @@ static struct option	long_options[] = {
 int
 main(int argc, char **argv)
 {
-	unsigned int opt_debug = 0;
-	const char *opt_build = NULL;
-	const char *opt_build_root = NULL;
-	unsigned int opt_use_count = 0;
-	const char *opt_use[LOWER_LAYERS_MAX];
-	bool opt_rpmdb = false;
 	struct wormhole_context *ctx;
 	int exit_status = 1;
 	int c;
 
+	ctx = wormhole_context_new();
+
 	while ((c = getopt_long(argc, argv, "B:dL:R:u:", long_options, NULL)) != EOF) {
 		switch (c) {
 		case 'B':
-			opt_build = optarg;
+			wormhole_context_set_build(ctx, optarg);
 			break;
 
 		case 'd':
-			opt_debug += 1;
+			tracing_increment_level();
 			break;
 
 		case 'R':
-			opt_build_root = optarg;
+			strutil_set(&ctx->build_root, optarg);
 			break;
 
 		case 'L':
 		case 'u':
-			if (opt_use_count >= LOWER_LAYERS_MAX)
-				log_fatal("Too many lower layers given");
-			opt_use[opt_use_count++] = optarg;
+			strutil_array_append(&ctx->layer_names, optarg);
 			break;
 
 		case OPT_RPMDB:
-			opt_rpmdb = true;
+			ctx->manage_rpmdb = true;
 			break;
 
 		default:
@@ -836,7 +811,6 @@ main(int argc, char **argv)
 	if (optind >= argc)
 		log_fatal("Missing command to be executed\n");
 
-	tracing_set_level(opt_debug);
 	trace("debug level set to %u\n", tracing_level);
 
 	if (!fsutil_dir_is_mountpoint("/")) {
@@ -844,25 +818,26 @@ main(int argc, char **argv)
 		wormhole_in_chroot = true;
 	}
 
-	ctx = wormhole_context_new();
-
 	wormhole_context_set_command(ctx, argv + optind);
-	ctx->manage_rpmdb = opt_rpmdb;
 
-	if (!wormhole_context_use_layers(ctx, opt_use_count, opt_use))
-		goto out;
-
-	if (opt_build) {
-		wormhole_context_set_build(ctx, opt_build, opt_build_root);
-
+	switch (ctx->purpose) {
+	case PURPOSE_BUILD:
 		do_build(ctx);
-	} else {
+		break;
+
+	case PURPOSE_NONE:
 		ctx->purpose = PURPOSE_USE;
+		/* fallthru */
+
+	case PURPOSE_USE:
 		do_run(ctx);
+		break;
+
+	default:
+		log_error("Unsupported purpose %u", ctx->purpose);
+		return 1;
 	}
 
-
-out:
 	exit_status = ctx->exit_status;
 	wormhole_context_free(ctx);
 
