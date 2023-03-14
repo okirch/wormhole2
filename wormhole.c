@@ -845,6 +845,7 @@ static struct option	long_options[] = {
 	{ "build",	required_argument,	NULL,	'B'		},
 	{ "buildroot",	required_argument,	NULL,	'R'		},
 	{ "use",	required_argument,	NULL,	'u'		},
+	{ "layer",	required_argument,	NULL,	'L'		},
 	{ "rpmdb",	no_argument,		NULL,	OPT_RPMDB	},
 
 	{ NULL },
@@ -863,7 +864,7 @@ main(int argc, char **argv)
 	int exit_status = 1;
 	int c;
 
-	while ((c = getopt_long(argc, argv, "B:dR:u:", long_options, NULL)) != EOF) {
+	while ((c = getopt_long(argc, argv, "B:dL:R:u:", long_options, NULL)) != EOF) {
 		switch (c) {
 		case 'B':
 			opt_build = optarg;
@@ -877,6 +878,7 @@ main(int argc, char **argv)
 			opt_build_root = optarg;
 			break;
 
+		case 'L':
 		case 'u':
 			if (opt_use_count >= LOWER_LAYERS_MAX)
 				log_fatal("Too many lower layers given");
