@@ -284,6 +284,13 @@ procutil_command_exec(struct procutil_command *cmd, const char *command)
 		}
 	}
 
+	if (cmd->procfs_mountpoint) {
+		if (!fsutil_mount_virtual_fs(cmd->procfs_mountpoint, "proc", NULL)) {
+			log_error("Unable to mount procfs on %s: %m", cmd->procfs_mountpoint);
+			exit(70);
+		}
+	}
+
 	trace("Executing \"%s\"", procutil_concat_argv(-1, cmd->argv));
 	execvp(command, cmd->argv);
 

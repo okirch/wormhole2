@@ -43,6 +43,7 @@ extern void			pathutil_concat2(char **path_p, const char *parent, const char *na
 struct procutil_command {
 	const char *	root_directory;
 	const char *	working_directory;
+	const char *	procfs_mountpoint;
 	char **		argv;
 };
 

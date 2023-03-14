@@ -394,6 +394,10 @@ wormhole_context_set_command(struct wormhole_context *ctx, char **argv)
 static bool
 wormhole_context_detach(struct wormhole_context *ctx)
 {
+	if (ctx->purpose == PURPOSE_BOOT) {
+		if (!wormhole_create_init_namespace())
+			return false;
+	} else
 	if (ctx->use_privileged_namespace) {
 		if (!wormhole_create_namespace())
 			return false;
@@ -583,6 +587,7 @@ __perform_boot(struct wormhole_context *ctx)
 	static const char *default_fstypes[] = {
 		"btrfs", "ext4", "xfs", NULL,
 	};
+	const char *root_dir;
 
 	ctx->exit_status = 100;
 
@@ -602,14 +607,14 @@ __perform_boot(struct wormhole_context *ctx)
 			log_error("Cannot mount %s file system on %s: %m", ctx->boot_fstype, ctx->boot_device);
 			goto out;
 		}
-		strutil_set(&ctx->farm->chroot, "/tmp/root");
+		root_dir = "/tmp/root";
 	} else {
 		const char **next, *fstype;
 
 		for (next = default_fstypes; (fstype = *next++) != NULL; ) {
 			if (mount(ctx->boot_device, "/tmp/root", fstype, 0, NULL) >= 0) {
 				trace("Successfully mounted %s using %s", ctx->boot_device, fstype);
-				strutil_set(&ctx->farm->chroot, "/tmp/root");
+				root_dir = "/tmp/root";
 				break;
 			}
 
@@ -617,24 +622,40 @@ __perform_boot(struct wormhole_context *ctx)
 		}
 	}
 
-	trace("chroot=%s", ctx->farm->chroot);
-	if (ctx->farm->chroot == NULL) {
+	if (root_dir == NULL) {
 		log_error("No root file system found");
 		goto out;
 	}
 
+	if (!fsutil_mount_bind("/dev", __fsutil_concat2(root_dir, "/dev"), true)
+	 || !fsutil_mount_bind("/sys", __fsutil_concat2(root_dir, "/sys"), true))
+		goto out;
+
+	strutil_set(&ctx->farm->chroot, root_dir);
 	if (!wormhole_context_switch_root(ctx))
+		goto out;
+
+	/* Do not mount a procfs here, but do it after fork() so that we see
+	 * the pids of the new namespace */
+	ctx->command.procfs_mountpoint = "/proc";
+
+	if (!fsutil_mount_tmpfs("/tmp")
+	 || !fsutil_mount_tmpfs("/run"))
 		goto out;
 
 	if (ctx->command.argv == NULL) {
 		char *argv_init[] = {
-			"/bin/init", NULL
+			"/usr/lib/systemd/systemd",
+			"--switched-root",
+			"--system",
+			"--log-level", "debug",
+			"--log-target", "console",
+			NULL
 		};
 		procutil_command_init(&ctx->command, argv_init);
 	}
 
-	procutil_command_exec(&ctx->command, ctx->command.argv[0]);
-	log_error("Failed to execute init process");
+	return run_the_command(ctx);
 
 out:
 	return ctx->exit_status;
