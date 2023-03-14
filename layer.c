@@ -356,9 +356,9 @@ wormhole_layers_resolve(struct wormhole_layer_array *layers, const struct struti
 
 
 bool
-wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct mount_leaf *tree)
+wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct fstree_node *tree)
 {
-	const struct mount_leaf *child;
+	const struct fstree_node *child;
 
 	if (tree->export_type == WORMHOLE_EXPORT_STACKED) {
 		strutil_array_append(&layer->stacked_directories, tree->relative_path);
@@ -382,7 +382,7 @@ wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct
 bool
 wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm *farm)
 {
-	struct mount_leaf *new_mount;
+	struct fstree_node *new_mount;
 	unsigned int i;
 
 	for (i = 0; i < layer->stacked_directories.count; ++i) {
@@ -390,7 +390,7 @@ wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm 
 
 		if (!(new_mount = mount_farm_add_stacked(farm, dir_path, layer)))
 			return false;
-		mount_leaf_set_fstype(new_mount, "overlay", farm);
+		fstree_node_set_fstype(new_mount, "overlay", farm);
 	}
 
 	for (i = 0; i < layer->transparent_directories.count; ++i) {
@@ -398,7 +398,7 @@ wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm 
 
 		if (!(new_mount = mount_farm_add_transparent(farm, dir_path, layer)))
 			return false;
-		mount_leaf_set_fstype(new_mount, "bind", farm);
+		fstree_node_set_fstype(new_mount, "bind", farm);
 	}
 
 	return true;

@@ -59,10 +59,10 @@ mount_farm_new(const char *farm_root)
 void
 mount_farm_free(struct mount_farm *farm)
 {
-	struct mount_leaf *root;
+	struct fstree_node *root;
 
 	if ((root = farm->tree->root) != NULL) {
-		mount_leaf_free(root);
+		fstree_node_free(root);
 		farm->tree->root = NULL;
 	}
 
@@ -116,25 +116,25 @@ mount_farm_set_upper_base(struct mount_farm *farm, const char *upper_base)
 	return farm->upper_base && farm->work_base;
 }
 
-struct mount_leaf *
+struct fstree_node *
 mount_farm_find_leaf(struct mount_farm *farm, const char *relative_path)
 {
-	return mount_leaf_lookup(farm->tree->root, relative_path, false);
+	return fstree_node_lookup(farm->tree->root, relative_path, false);
 }
 
 bool
 mount_farm_has_mount_for(struct mount_farm *farm, const char *path)
 {
-	struct mount_leaf *leaf;
+	struct fstree_node *node;
 
-	if (!(leaf = mount_leaf_lookup(farm->tree->root, path, false)))
+	if (!(node = fstree_node_lookup(farm->tree->root, path, false)))
 		return false;
 
-	return mount_leaf_is_mountpoint(leaf);
+	return fstree_node_is_mountpoint(node);
 }
 
 static bool
-__mount_farm_fudge_non_directory(struct mount_leaf *node, struct mount_leaf *closest_ancestor, int dtype, struct wormhole_layer *layer)
+__mount_farm_fudge_non_directory(struct fstree_node *node, struct fstree_node *closest_ancestor, int dtype, struct wormhole_layer *layer)
 {
 	trace("%s is not a directory - dt %u", node->relative_path, dtype);
 	node->dtype = dtype;
@@ -165,13 +165,13 @@ __mount_farm_fudge_non_directory(struct mount_leaf *node, struct mount_leaf *clo
 		if (dtype != DT_REG)
 			return false;
 
-		relative_path = mount_leaf_relative_path(closest_ancestor, node);
+		relative_path = fstree_node_relative_path(closest_ancestor, node);
 
 		/* As we're transferring the file to our ancestor, this mount is no longer
 		 * relevant. As a side effect, this removes the corresponding mount point
 		 * directory below upperdir, allowing us to copy the regular file into
 		 * upperdir at the same location. */
-		mount_leaf_invalidate(node);
+		fstree_node_invalidate(node);
 
 		pathutil_concat2(&src_path, layer->image_path, node->relative_path);
 		pathutil_concat2(&dst_path, closest_ancestor->upper, relative_path);
@@ -188,9 +188,9 @@ __mount_farm_fudge_non_directory(struct mount_leaf *node, struct mount_leaf *clo
 }
 
 static bool
-__mount_farm_percolate(struct mount_leaf *node, struct mount_leaf *closest_ancestor)
+__mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_ancestor)
 {
-	struct mount_leaf *child;
+	struct fstree_node *child;
 	unsigned int i;
 
 	trace3("%*.*s%s(%s [%s])",
@@ -273,7 +273,7 @@ __mount_farm_percolate(struct mount_leaf *node, struct mount_leaf *closest_ances
 		wormhole_layer_array_destroy(&node->attached_layers);
 
 		/* No longer mount anything on this node */
-		mount_leaf_invalidate(node);
+		fstree_node_invalidate(node);
 		break;
 
 	default:
@@ -306,42 +306,42 @@ __mount_farm_percolate(struct mount_leaf *node, struct mount_leaf *closest_ances
 bool
 mount_farm_percolate(struct mount_farm *farm)
 {
-	struct mount_leaf *root = farm->tree->root;
+	struct fstree_node *root = farm->tree->root;
 
 	return __mount_farm_percolate(root, root);
 }
 
-struct mount_leaf *
+struct fstree_node *
 fstree_add_export(struct fstree *fstree, const char *system_path, unsigned int export_type, struct wormhole_layer *layer)
 {
-	struct mount_leaf *leaf;
+	struct fstree_node *node;
 
-	if (!(leaf = mount_leaf_lookup(fstree->root, system_path, true)))
+	if (!(node = fstree_node_lookup(fstree->root, system_path, true)))
 		return NULL;
 
-	if (leaf->export_type == WORMHOLE_EXPORT_NONE) {
+	if (node->export_type == WORMHOLE_EXPORT_NONE) {
 		trace2("  mount farm: add new %s mount %s", mount_export_type_as_string(export_type),  system_path);
-		leaf->export_type = export_type;
+		node->export_type = export_type;
 	} else
-	if (leaf->export_type != export_type) {
+	if (node->export_type != export_type) {
 		log_error("%s: conflicting export types (%s vs %s", system_path,
-				mount_export_type_as_string(leaf->export_type),
+				mount_export_type_as_string(node->export_type),
 				mount_export_type_as_string(export_type));
 		return NULL;
 	}
 
 	if (layer)
-		wormhole_layer_array_append(&leaf->attached_layers, layer);
-	return leaf;
+		wormhole_layer_array_append(&node->attached_layers, layer);
+	return node;
 }
 
-struct mount_leaf *
+struct fstree_node *
 mount_farm_add_stacked(struct mount_farm *farm, const char *system_path, struct wormhole_layer *layer)
 {
 	return fstree_add_export(farm->tree, system_path, WORMHOLE_EXPORT_STACKED, layer);
 }
 
-struct mount_leaf *
+struct fstree_node *
 mount_farm_add_transparent(struct mount_farm *farm, const char *system_path, struct wormhole_layer *layer)
 {
 	return fstree_add_export(farm->tree, system_path, WORMHOLE_EXPORT_TRANSPARENT, layer);
@@ -350,12 +350,12 @@ mount_farm_add_transparent(struct mount_farm *farm, const char *system_path, str
 bool
 mount_farm_add_missing_children(struct mount_farm *farm, const char *system_path)
 {
-	struct mount_leaf *dir_node;
+	struct fstree_node *dir_node;
 	DIR *dir;
 	struct dirent *d;
 	bool okay = false;
 
-	if (!(dir_node = mount_leaf_lookup(farm->tree->root, system_path, false))) {
+	if (!(dir_node = fstree_node_lookup(farm->tree->root, system_path, false))) {
 		trace("%s: oops, no mount node for %s?!", __func__, system_path);
 		return false;
 	}
@@ -366,7 +366,7 @@ mount_farm_add_missing_children(struct mount_farm *farm, const char *system_path
 	}
 
 	while ((d = readdir(dir)) != NULL) {
-		struct mount_leaf *child;
+		struct fstree_node *child;
 
 		if (!strcmp(d->d_name, ".") || !strcmp(d->d_name, ".."))
 			continue;
@@ -376,14 +376,14 @@ mount_farm_add_missing_children(struct mount_farm *farm, const char *system_path
 			continue;
 		}
 
-		child = mount_leaf_lookup(dir_node, d->d_name, false);
+		child = fstree_node_lookup(dir_node, d->d_name, false);
 		if (child == NULL) {
 			child = mount_farm_add_transparent(farm, __fsutil_concat2(system_path, d->d_name), NULL);
 			if (child == NULL) {
 				log_error("%s: cannot add transparent mount for %s/%s", __func__, system_path, d->d_name);
 				goto out;
 			}
-			mount_leaf_set_fstype(child, "bind", farm);
+			fstree_node_set_fstype(child, "bind", farm);
 		}
 	}
 
@@ -395,12 +395,12 @@ out:
 }
 
 static bool
-__mount_farm_mount_leaf(const struct mount_leaf *leaf)
+__mount_farm_mount_one(const struct fstree_node *node)
 {
-	if (leaf->fstype == NULL)
+	if (node->fstype == NULL)
 		return true;
 
-	if (!mount_leaf_mount(leaf))
+	if (!fstree_node_mount(node))
 		return false;
 
 	num_mounted++;
@@ -412,7 +412,7 @@ mount_farm_mount_all(struct mount_farm *farm)
 {
 	num_mounted = 0;
 
-	if (!mount_leaf_traverse(farm->tree->root, __mount_farm_mount_leaf))
+	if (!fstree_node_traverse(farm->tree->root, __mount_farm_mount_one))
 		return false;
 
 	farm->num_mounts = num_mounted;

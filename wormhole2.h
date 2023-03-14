@@ -6,7 +6,7 @@
 #include "util.h"
 
 typedef struct mount_farm mount_farm_t;
-typedef struct mount_leaf mount_leaf_t;
+typedef struct fstree_node fstree_node_t;
 
 struct wormhole_layer_array {
 	unsigned int		count;
@@ -24,7 +24,7 @@ struct mount_farm {
 };
 
 struct fstree {
-	struct mount_leaf *root;
+	struct fstree_node *root;
 };
 
 #define MOUNT_LEAF_LOWER_MAX	8
@@ -37,10 +37,10 @@ enum {
 	WORMHOLE_EXPORT_TRANSPARENT,
 };
 
-struct mount_leaf {
-	struct mount_leaf *parent;
-	struct mount_leaf *next;
-	struct mount_leaf *children;
+struct fstree_node {
+	struct fstree_node *parent;
+	struct fstree_node *next;
+	struct fstree_node *children;
 
 	bool		readonly;
 	bool		nonempty;
@@ -111,9 +111,9 @@ struct wormhole_context {
 	struct fsutil_tempdir	temp;
 };
 
-struct fstree *		fstree_new(void);
+struct fstree *			fstree_new(void);
 extern void			fstree_free(struct fstree *fstree);
-extern struct mount_leaf *	fstree_create_leaf(struct fstree *fstree, const char *relative_path);
+extern struct fstree_node *	fstree_create_leaf(struct fstree *fstree, const char *relative_path);
 extern bool			fstree_make_relative(struct fstree *fstree,
 					const char *common_root);
 extern bool			fstree_discover(const char *mtab,
@@ -122,45 +122,45 @@ extern bool			fstree_discover(const char *mtab,
 							const char *mnt_type,
 							const char *fsname),
 					void *user_data);
-extern struct mount_leaf *	fstree_add_export(struct fstree *fstree, const char *system_path,
+extern struct fstree_node *	fstree_add_export(struct fstree *fstree, const char *system_path,
 					unsigned int export_type, struct wormhole_layer *layer);
 
-extern struct fstree_iter *fstree_iterator_new(struct fstree *fstree);
-extern struct mount_leaf *	fstree_iterator_next(struct fstree_iter *);
-extern void			fstree_iterator_skip(struct fstree_iter *, struct mount_leaf *);
+extern struct fstree_iter *	fstree_iterator_new(struct fstree *fstree);
+extern struct fstree_node *	fstree_iterator_next(struct fstree_iter *);
+extern void			fstree_iterator_skip(struct fstree_iter *, struct fstree_node *);
 extern void			fstree_iterator_free(struct fstree_iter *);
 
 extern struct mount_farm *	mount_farm_new(const char *farm_root);
 extern void			mount_farm_free(struct mount_farm *farm);
 extern bool			mount_farm_create_workspace(struct mount_farm *farm);
 extern bool			mount_farm_set_upper_base(struct mount_farm *farm, const char *upper_base);
-extern struct mount_leaf *	mount_farm_find_leaf(struct mount_farm *farm, const char *relative_path);
+extern struct fstree_node *	mount_farm_find_leaf(struct mount_farm *farm, const char *relative_path);
 extern bool			mount_farm_mount_all(struct mount_farm *farm);
-extern struct mount_leaf *	mount_farm_add_system_dir(struct mount_farm *farm, const char *system_path);
+extern struct fstree_node *	mount_farm_add_system_dir(struct mount_farm *farm, const char *system_path);
 extern bool			mount_farm_bind_system_dir(struct mount_farm *farm, const char *system_path);
-extern struct mount_leaf *	mount_farm_add_stacked(struct mount_farm *farm, const char *system_path, struct wormhole_layer *layer);
-extern struct mount_leaf *	mount_farm_add_transparent(struct mount_farm *farm, const char *system_path, struct wormhole_layer *layer);
+extern struct fstree_node *	mount_farm_add_stacked(struct mount_farm *farm, const char *system_path, struct wormhole_layer *layer);
+extern struct fstree_node *	mount_farm_add_transparent(struct mount_farm *farm, const char *system_path, struct wormhole_layer *layer);
 extern bool			mount_farm_add_missing_children(struct mount_farm *farm, const char *system_path);
 extern bool			mount_farm_percolate(struct mount_farm *farm);
 extern bool			mount_farm_has_mount_for(struct mount_farm *farm, const char *path);
-extern struct mount_leaf *	mount_farm_add_virtual_mount(struct mount_farm *farm, const char *system_path, const char *fstype);
+extern struct fstree_node *	mount_farm_add_virtual_mount(struct mount_farm *farm, const char *system_path, const char *fstype);
 extern bool			mount_farm_mount_into(struct mount_farm *farm, const char *src, const char *dst);
 extern void			mount_farm_print_tree(struct mount_farm *farm);
 
-extern void			mount_leaf_free(struct mount_leaf *leaf);
-extern struct mount_leaf *	mount_leaf_new(const char *name, const char *relative_path);
-extern bool			mount_leaf_is_mountpoint(const struct mount_leaf *leaf);
-extern bool			mount_leaf_is_below_mountpoint(const struct mount_leaf *leaf);
-extern struct mount_leaf *	mount_leaf_lookup(struct mount_leaf *parent, const char *relative_path, bool create);
-extern char *			mount_leaf_relative_path(struct mount_leaf *ancestor, struct mount_leaf *node);
-extern bool			mount_leaf_set_fstype(struct mount_leaf *leaf, const char *fstype, struct mount_farm *farm);
-extern bool			mount_leaf_add_lower(struct mount_leaf *leaf, const char *path);
-extern char *			mount_leaf_build_lowerspec(const struct mount_leaf *leaf);
-extern void			mount_leaf_invalidate(struct mount_leaf *leaf);
-extern bool			mount_leaf_zap_dirs(struct mount_leaf *leaf);
-extern bool			mount_leaf_mount(const struct mount_leaf *leaf);
-extern bool			mount_leaf_traverse(struct mount_leaf *node, bool (*visitorfn)(const struct mount_leaf *));
-extern void			mount_tree_print(struct mount_leaf *leaf);
+extern void			fstree_node_free(struct fstree_node *leaf);
+extern struct fstree_node *	fstree_node_new(const char *name, const char *relative_path);
+extern bool			fstree_node_is_mountpoint(const struct fstree_node *leaf);
+extern bool			fstree_node_is_below_mountpoint(const struct fstree_node *leaf);
+extern struct fstree_node *	fstree_node_lookup(struct fstree_node *parent, const char *relative_path, bool create);
+extern char *			fstree_node_relative_path(struct fstree_node *ancestor, struct fstree_node *node);
+extern bool			fstree_node_set_fstype(struct fstree_node *leaf, const char *fstype, struct mount_farm *farm);
+extern bool			fstree_node_add_lower(struct fstree_node *leaf, const char *path);
+extern char *			fstree_node_build_lowerspec(const struct fstree_node *leaf);
+extern void			fstree_node_invalidate(struct fstree_node *leaf);
+extern bool			fstree_node_zap_dirs(struct fstree_node *leaf);
+extern bool			fstree_node_mount(const struct fstree_node *leaf);
+extern bool			fstree_node_traverse(struct fstree_node *node, bool (*visitorfn)(const struct fstree_node *));
+extern void			mount_tree_print(struct fstree_node *leaf);
 extern const char *		mount_export_type_as_string(int export_type);
 
 extern struct wormhole_layer *	wormhole_layer_new(const char *name, const char *path, unsigned int depth);
@@ -175,7 +175,7 @@ extern void			wormhole_layer_array_append_unique(struct wormhole_layer_array *a,
 extern struct wormhole_layer *	wormhole_layer_array_find(struct wormhole_layer_array *a, const char *name);
 extern void			wormhole_layer_array_destroy(struct wormhole_layer_array *a);
 
-extern bool			wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct mount_leaf *tree);
+extern bool			wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct fstree_node *tree);
 extern bool			wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm *farm);
 extern bool			wormhole_layers_resolve(struct wormhole_layer_array *layers, const struct strutil_array *names, const char *remount_image_base);
 

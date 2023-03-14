@@ -22,7 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h> /* just for mount_leaf_zap_dirs() */
+#include <errno.h> /* just for fstree_node_zap_dirs() */
 #include <assert.h>
 
 #include "wormhole2.h"
@@ -37,7 +37,7 @@ fstree_new(void)
 	struct fstree *fstree;
 
 	fstree = calloc(1, sizeof(*fstree));
-	fstree->root = mount_leaf_new("", "/");
+	fstree->root = fstree_node_new("", "/");
 
 	return fstree;
 }
@@ -45,54 +45,54 @@ fstree_new(void)
 void
 fstree_free(struct fstree *fstree)
 {
-	struct mount_leaf *root;
+	struct fstree_node *root;
 
 	if ((root = fstree->root) != NULL) {
-		mount_leaf_free(root);
+		fstree_node_free(root);
 		fstree->root = NULL;
 	}
 }
 
-struct mount_leaf *
+struct fstree_node *
 fstree_create_leaf(struct fstree *fstree, const char *relative_path)
 {
-	return mount_leaf_lookup(fstree->root, relative_path, true);
+	return fstree_node_lookup(fstree->root, relative_path, true);
 }
 
 static bool
-__fstree_make_relative_paths(struct mount_leaf *leaf, const char *common_root, unsigned int len)
+__fstree_make_relative_paths(struct fstree_node *node, const char *common_root, unsigned int len)
 {
-	struct mount_leaf *child;
+	struct fstree_node *child;
 	bool okay = true;
 
-	if (memcmp(leaf->relative_path, common_root, len))
+	if (memcmp(node->relative_path, common_root, len))
 		goto bad_path;
 
-	if (leaf->relative_path[len] == '\0')
-		strutil_set(&leaf->relative_path, "/");
+	if (node->relative_path[len] == '\0')
+		strutil_set(&node->relative_path, "/");
 	else
-	if (leaf->relative_path[len] != '/')
+	if (node->relative_path[len] != '/')
 		goto bad_path;
 	else
-		strutil_set(&leaf->relative_path, leaf->relative_path + len);
+		strutil_set(&node->relative_path, node->relative_path + len);
 
-	// trace(" %s -> %s", leaf->full_path, leaf->relative_path);
-	for (child = leaf->children; okay && child; child = child->next)
+	// trace(" %s -> %s", node->full_path, node->relative_path);
+	for (child = node->children; okay && child; child = child->next)
 		okay = __fstree_make_relative_paths(child, common_root, len);
 
 	return okay;
 
 bad_path:
-	log_error("%s is not relative to %s\n", leaf->relative_path, common_root);
+	log_error("%s is not relative to %s\n", node->relative_path, common_root);
 	return false;
 }
 
 bool
 fstree_make_relative(struct fstree *fstree, const char *common_root)
 {
-	struct mount_leaf *layer_root;
+	struct fstree_node *layer_root;
 
-	layer_root = mount_leaf_lookup(fstree->root, common_root, false);
+	layer_root = fstree_node_lookup(fstree->root, common_root, false);
 	if (!layer_root)
 		return false;
 
@@ -105,98 +105,98 @@ fstree_make_relative(struct fstree *fstree, const char *common_root)
 }
 
 void
-mount_leaf_free(struct mount_leaf *leaf)
+fstree_node_free(struct fstree_node *node)
 {
-	struct mount_leaf *child;
+	struct fstree_node *child;
 
-	leaf->parent = NULL;
+	node->parent = NULL;
 
-	while ((child = leaf->children) != NULL) {
-		leaf->children = child->next;
-		mount_leaf_free(child);
+	while ((child = node->children) != NULL) {
+		node->children = child->next;
+		fstree_node_free(child);
 	}
 
-	strutil_drop(&leaf->relative_path);
-	strutil_drop(&leaf->full_path);
-	strutil_drop(&leaf->upper);
-	strutil_drop(&leaf->work);
-	strutil_drop(&leaf->mountpoint);
+	strutil_drop(&node->relative_path);
+	strutil_drop(&node->full_path);
+	strutil_drop(&node->upper);
+	strutil_drop(&node->work);
+	strutil_drop(&node->mountpoint);
 }
 
-struct mount_leaf *
-mount_leaf_new(const char *name, const char *relative_path)
+struct fstree_node *
+fstree_node_new(const char *name, const char *relative_path)
 {
-	struct mount_leaf *leaf;
+	struct fstree_node *node;
 
-	leaf = calloc(1, sizeof(*leaf));
-	leaf->name = strdup(name);
-	leaf->relative_path = strdup(relative_path);
-	leaf->full_path = strdup(relative_path);
-	leaf->dtype = -1;
+	node = calloc(1, sizeof(*node));
+	node->name = strdup(name);
+	node->relative_path = strdup(relative_path);
+	node->full_path = strdup(relative_path);
+	node->dtype = -1;
 
-	return leaf;
-}
-
-inline bool
-mount_leaf_is_mountpoint(const struct mount_leaf *leaf)
-{
-	return leaf->fstype != NULL;
+	return node;
 }
 
 inline bool
-mount_leaf_is_below_mountpoint(const struct mount_leaf *leaf)
+fstree_node_is_mountpoint(const struct fstree_node *node)
 {
-	while (leaf) {
-		if (leaf->fstype != NULL)
+	return node->fstype != NULL;
+}
+
+inline bool
+fstree_node_is_below_mountpoint(const struct fstree_node *node)
+{
+	while (node) {
+		if (node->fstype != NULL)
 			return true;
-		leaf = leaf->parent;
+		node = node->parent;
 	}
 	return false;
 }
 
-struct mount_leaf *
-mount_leaf_lookup(struct mount_leaf *parent, const char *relative_path, bool create)
+struct fstree_node *
+fstree_node_lookup(struct fstree_node *parent, const char *relative_path, bool create)
 {
 	struct pathutil_parser path_parser;
-	struct mount_leaf *leaf = NULL, **pos;
+	struct fstree_node *node = NULL, **pos;
 
 	pathutil_parser_init(&path_parser, relative_path);
 
 	/* If the path is empty, return the node itself */
-	leaf = parent;
+	node = parent;
 
 	pos = &parent->children;
 
 	while (pathutil_parser_next(&path_parser)) {
 		const char *name = path_parser.namebuf;
 
-		while ((leaf = *pos) != NULL) {
-			if (!strcmp(leaf->name, name))
+		while ((node = *pos) != NULL) {
+			if (!strcmp(node->name, name))
 				break;
-			pos = &(leaf->next);
+			pos = &(node->next);
 		}
 
-		if (leaf == NULL) {
+		if (node == NULL) {
 			if (!create)
 				break;
 
 			// trace3("Creating node for %s as child of %s\n", path_parser.pathbuf, parent->relative_path);
-			leaf = mount_leaf_new(path_parser.namebuf, path_parser.pathbuf);
-			leaf->depth = parent->depth + 1;
+			node = fstree_node_new(path_parser.namebuf, path_parser.pathbuf);
+			node->depth = parent->depth + 1;
 
-			leaf->parent = parent;
-			*pos = leaf;
+			node->parent = parent;
+			*pos = node;
 		}
 
-		parent = leaf;
-		pos = &leaf->children;
+		parent = node;
+		pos = &node->children;
 	}
 
-	return leaf;
+	return node;
 }
 
 char *
-mount_leaf_relative_path(struct mount_leaf *ancestor, struct mount_leaf *node)
+fstree_node_relative_path(struct fstree_node *ancestor, struct fstree_node *node)
 {
 	char relative_path[PATH_MAX + 1];
 	unsigned int pos, n;
@@ -221,17 +221,17 @@ mount_leaf_relative_path(struct mount_leaf *ancestor, struct mount_leaf *node)
 }
 
 bool
-mount_leaf_zap_dirs(struct mount_leaf *leaf)
+fstree_node_zap_dirs(struct fstree_node *node)
 {
 	const char *to_zap[10];
 	unsigned int i = 0;
 
-	if (leaf->upper)
-		to_zap[i++] = leaf->upper;
-	if (leaf->work)
-		to_zap[i++] = leaf->work;
-	if (leaf->mountpoint)
-		to_zap[i++] = leaf->mountpoint;
+	if (node->upper)
+		to_zap[i++] = node->upper;
+	if (node->work)
+		to_zap[i++] = node->work;
+	if (node->mountpoint)
+		to_zap[i++] = node->mountpoint;
 
 	while (i--) {
 		const char *dir = to_zap[i];
@@ -245,61 +245,61 @@ mount_leaf_zap_dirs(struct mount_leaf *leaf)
 }
 
 bool
-mount_leaf_set_fstype(struct mount_leaf *leaf, const char *fstype, struct mount_farm *farm)
+fstree_node_set_fstype(struct fstree_node *node, const char *fstype, struct mount_farm *farm)
 {
-	if (leaf->fstype == NULL) {
-		strutil_set(&leaf->fstype, fstype);
-	} else if (strcmp(leaf->fstype, fstype)) {
-		log_error("VFS type of %s changes from %s to %s\n", leaf->relative_path, leaf->fstype, fstype);
+	if (node->fstype == NULL) {
+		strutil_set(&node->fstype, fstype);
+	} else if (strcmp(node->fstype, fstype)) {
+		log_error("VFS type of %s changes from %s to %s\n", node->relative_path, node->fstype, fstype);
 		return false;
 	}
 
-	if (!leaf->upper)
-		strutil_set(&leaf->upper, fsutil_makedir2(farm->upper_base, leaf->relative_path));
+	if (!node->upper)
+		strutil_set(&node->upper, fsutil_makedir2(farm->upper_base, node->relative_path));
 
-	if (!leaf->work)
-		strutil_set(&leaf->work, fsutil_makedir2(farm->work_base, leaf->relative_path));
+	if (!node->work)
+		strutil_set(&node->work, fsutil_makedir2(farm->work_base, node->relative_path));
 
-	if (!leaf->mountpoint)
-		strutil_set(&leaf->mountpoint, fsutil_makedir2(farm->chroot, leaf->relative_path));
+	if (!node->mountpoint)
+		strutil_set(&node->mountpoint, fsutil_makedir2(farm->chroot, node->relative_path));
 
-	return leaf->upper && leaf->work && leaf->mountpoint;
+	return node->upper && node->work && node->mountpoint;
 }
 
 /*
  * Change a node from a mount to in internal, non-mount node
  */
 void
-mount_leaf_invalidate(struct mount_leaf *leaf)
+fstree_node_invalidate(struct fstree_node *node)
 {
-	if (leaf->export_type != WORMHOLE_EXPORT_ROOT)
-		leaf->export_type = WORMHOLE_EXPORT_NONE;
+	if (node->export_type != WORMHOLE_EXPORT_ROOT)
+		node->export_type = WORMHOLE_EXPORT_NONE;
 
-	strutil_drop(&leaf->fstype);
+	strutil_drop(&node->fstype);
 
-	mount_leaf_zap_dirs(leaf);
-	strutil_drop(&leaf->upper);
-	strutil_drop(&leaf->work);
-	strutil_drop(&leaf->mountpoint);
+	fstree_node_zap_dirs(node);
+	strutil_drop(&node->upper);
+	strutil_drop(&node->work);
+	strutil_drop(&node->mountpoint);
 }
 
 char *
-mount_leaf_build_lowerspec(const struct mount_leaf *leaf)
+fstree_node_build_lowerspec(const struct fstree_node *node)
 {
-	const struct wormhole_layer_array *layers = &leaf->attached_layers;
+	const struct wormhole_layer_array *layers = &node->attached_layers;
 	struct strutil_array dirs = { 0, };
 	unsigned int n;
 	char *result;
 
-	trace3("%s(%s): %u layers", __func__, leaf->relative_path, layers->count);
+	trace3("%s(%s): %u layers", __func__, node->relative_path, layers->count);
 	for (n = 0; n < layers->count; ++n) {
 		struct wormhole_layer *layer = layers->data[n];
 
-		strutil_array_append(&dirs, __fsutil_concat2(layer->image_path, leaf->relative_path));
+		strutil_array_append(&dirs, __fsutil_concat2(layer->image_path, node->relative_path));
 	}
 
 	if (dirs.count == 0) {
-		log_error("Cannot build lowerdir spec for %s: no directories given", leaf->relative_path);
+		log_error("Cannot build lowerdir spec for %s: no directories given", node->relative_path);
 		return NULL;
 	}
 
@@ -310,86 +310,86 @@ mount_leaf_build_lowerspec(const struct mount_leaf *leaf)
 }
 
 bool
-mount_leaf_mount(const struct mount_leaf *leaf)
+fstree_node_mount(const struct fstree_node *node)
 {
 	char options[3 * PATH_MAX + 100];
 	char *lowerspec;
 
-	if (leaf->fstype == NULL)
+	if (node->fstype == NULL)
 		return true;
 
-	if (!strcmp(leaf->fstype, "hidden")) {
+	if (!strcmp(node->fstype, "hidden")) {
 		/* magic name - we just create the mount point but leave it unused. */
 		return true;
 	}
 
-	if (leaf->upper && chown(leaf->upper, 0, 0))
-		log_warning("Unable to chown %s: %m", leaf->upper);
+	if (node->upper && chown(node->upper, 0, 0))
+		log_warning("Unable to chown %s: %m", node->upper);
 
-	if (leaf->parent && leaf->parent->export_type == WORMHOLE_EXPORT_ROOT)
-		(void) fsutil_makedirs(leaf->mountpoint, 0755);
+	if (node->parent && node->parent->export_type == WORMHOLE_EXPORT_ROOT)
+		(void) fsutil_makedirs(node->mountpoint, 0755);
 
-	if (strcmp(leaf->fstype, "overlay")) {
+	if (strcmp(node->fstype, "overlay")) {
 		const char *fsname = "wormhole";
 
-		if (!strcmp(leaf->fstype, "bind")) {
-			const char *bind_source = leaf->relative_path;
+		if (!strcmp(node->fstype, "bind")) {
+			const char *bind_source = node->relative_path;
 
-			if (leaf->bind_mount_override_layer)
-				bind_source = __fsutil_concat2(leaf->bind_mount_override_layer->image_path, bind_source);
+			if (node->bind_mount_override_layer)
+				bind_source = __fsutil_concat2(node->bind_mount_override_layer->image_path, bind_source);
 
-			trace("Binding mounting %s on %s\n", bind_source, leaf->relative_path);
-			return fsutil_mount_bind(bind_source, leaf->mountpoint, false);
+			trace("Binding mounting %s on %s\n", bind_source, node->relative_path);
+			return fsutil_mount_bind(bind_source, node->mountpoint, false);
 		}
 
-		trace("Mounting %s file system on %s\n", leaf->fstype, leaf->relative_path);
-		if (mount(fsname, leaf->mountpoint, leaf->fstype, MS_NOATIME|MS_LAZYTIME, NULL) < 0) {
-			log_error("Unable to mount %s fs on %s: %m\n", leaf->fstype, leaf->mountpoint);
+		trace("Mounting %s file system on %s\n", node->fstype, node->relative_path);
+		if (mount(fsname, node->mountpoint, node->fstype, MS_NOATIME|MS_LAZYTIME, NULL) < 0) {
+			log_error("Unable to mount %s fs on %s: %m\n", node->fstype, node->mountpoint);
 			return NULL;
 		}
 		return true;
 	}
 
-	if (leaf->dtype >= 0 && leaf->dtype != DT_REG && leaf->dtype != DT_LNK)
-		log_warning("%s is not a regular file; building an overlay will probably fail", leaf->relative_path);
+	if (node->dtype >= 0 && node->dtype != DT_REG && node->dtype != DT_LNK)
+		log_warning("%s is not a regular file; building an overlay will probably fail", node->relative_path);
 
-	if (!(lowerspec = mount_leaf_build_lowerspec(leaf)))
+	if (!(lowerspec = fstree_node_build_lowerspec(node)))
 		return false;
 
-	if (!leaf->readonly)
+	if (!node->readonly)
 		snprintf(options, sizeof(options),
 			"lowerdir=%s,upperdir=%s,workdir=%s",
-			lowerspec, leaf->upper, leaf->work);
+			lowerspec, node->upper, node->work);
 	else
 		snprintf(options, sizeof(options),
 			"lowerdir=/%s,workdir=%s",
-			lowerspec, leaf->work);
+			lowerspec, node->work);
 
-	trace("Mounting %s file system on %s (lower=%s)\n", leaf->fstype, leaf->relative_path, lowerspec);
-	if (mount("wormhole", leaf->mountpoint, "overlay", MS_NOATIME|MS_LAZYTIME, options) < 0) {
-		log_error("Unable to mount %s: %m\n", leaf->mountpoint);
+	trace("Mounting %s file system on %s (lower=%s)\n", node->fstype, node->relative_path, lowerspec);
+	if (mount("wormhole", node->mountpoint, "overlay", MS_NOATIME|MS_LAZYTIME, options) < 0) {
+		log_error("Unable to mount %s: %m\n", node->mountpoint);
 		free(lowerspec);
 		return NULL;
 	}
 
-	trace2("Mounted %s: %s\n", leaf->mountpoint, lowerspec);
+	trace2("Mounted %s: %s\n", node->mountpoint, lowerspec);
 	trace3("  mount option %s", options);
 
 	free(lowerspec);
-	return leaf;
+	return node;
 }
 
 bool
-mount_leaf_traverse(struct mount_leaf *node, bool (*visitorfn)(const struct mount_leaf *))
+fstree_node_traverse(struct fstree_node *node, bool (*visitorfn)(const struct fstree_node *))
 {
-	struct mount_leaf *leaf;
+	struct fstree_node *child;
 	bool ok = true;
 
 	if (!visitorfn(node))
 		return false;
 
-	for (leaf = node->children; ok && leaf; leaf = leaf->next)
-		ok = mount_leaf_traverse(leaf, visitorfn);
+	for (child = node->children; ok && child; child = child->next)
+		ok = fstree_node_traverse(child, visitorfn);
 
 	return ok;
 }
@@ -414,18 +414,18 @@ mount_export_type_as_string(int export_type)
 }
 
 bool
-__mount_leaf_print(const struct mount_leaf *leaf)
+__fstree_node_print(const struct fstree_node *node)
 {
-	unsigned int ws = leaf->depth * 2;
-	const char *name = leaf->name;
+	unsigned int ws = node->depth * 2;
+	const char *name = node->name;
 	const char *type;
 
 	if (!name || !*name)
 		name = "/";
 
-	type = mount_export_type_as_string(leaf->export_type);
-	if (leaf->mountpoint) {
-		trace("%*.*s%s %-12s [%s mount on %s]", ws, ws, "", name, type, leaf->fstype, leaf->mountpoint);
+	type = mount_export_type_as_string(node->export_type);
+	if (node->mountpoint) {
+		trace("%*.*s%s %-12s [%s mount on %s]", ws, ws, "", name, type, node->fstype, node->mountpoint);
 	} else {
 		trace("%*.*s%s %s", ws, ws, "", name, type);
 	}
@@ -433,9 +433,9 @@ __mount_leaf_print(const struct mount_leaf *leaf)
 }
 
 void
-mount_tree_print(struct mount_leaf *leaf)
+mount_tree_print(struct fstree_node *node)
 {
-	mount_leaf_traverse(leaf, __mount_leaf_print);
+	fstree_node_traverse(node, __fstree_node_print);
 }
 
 /*
@@ -446,8 +446,8 @@ enum {
 	TREE_ITER_RIGHT = 0x02,
 };
 struct fstree_iter {
-	struct mount_leaf *	current;
-	struct mount_leaf *	next;
+	struct fstree_node *	current;
+	struct fstree_node *	next;
 	int			direction;
 };
 
@@ -462,10 +462,10 @@ fstree_iterator_new(struct fstree *fstree)
 	return it;
 }
 
-static struct mount_leaf *
-__fstree_iterator_next(struct mount_leaf *current, unsigned int dir_mask)
+static struct fstree_node *
+__fstree_iterator_next(struct fstree_node *current, unsigned int dir_mask)
 {
-	struct mount_leaf *next = current;
+	struct fstree_node *next = current;
 
 	while (next != NULL) {
 		if ((dir_mask & TREE_ITER_DOWN) && next->children)
@@ -482,10 +482,10 @@ __fstree_iterator_next(struct mount_leaf *current, unsigned int dir_mask)
 	return next;
 }
 
-struct mount_leaf *
+struct fstree_node *
 fstree_iterator_next(struct fstree_iter *it)
 {
-	struct mount_leaf *current = it->next;
+	struct fstree_node *current = it->next;
 
 	it->next = __fstree_iterator_next(it->next, TREE_ITER_DOWN | TREE_ITER_RIGHT);
 	it->current = current;
@@ -493,9 +493,9 @@ fstree_iterator_next(struct fstree_iter *it)
 }
 
 void
-fstree_iterator_skip(struct fstree_iter *it, struct mount_leaf *leaf)
+fstree_iterator_skip(struct fstree_iter *it, struct fstree_node *node)
 {
-	if (it->current == leaf) {
+	if (it->current == node) {
 		/* Force a move up and then right */
 		it->next = __fstree_iterator_next(it->current, 0);
 		it->current = NULL;

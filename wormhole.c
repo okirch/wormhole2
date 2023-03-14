@@ -55,7 +55,7 @@ __mount_farm_discover_callback(void *closure, const char *mount_point,
                                 const char *fsname)
 {
 	struct fstree *fstree = closure;
-	struct mount_leaf *leaf;
+	struct fstree_node *node;
 
 	if (!strcmp(mount_point, "/"))
 		return true;
@@ -65,20 +65,20 @@ __mount_farm_discover_callback(void *closure, const char *mount_point,
 		return true;
 	}
 
-	leaf = fstree_add_export(fstree, mount_point, WORMHOLE_EXPORT_TRANSPARENT, NULL);
-	if (leaf == NULL) {
+	node = fstree_add_export(fstree, mount_point, WORMHOLE_EXPORT_TRANSPARENT, NULL);
+	if (node == NULL) {
 		log_error("mount_farm_add_transparent(%s) failed\n", mount_point);
 		return false;
 	}
 
-	if (leaf->fstype) {
-		log_error("%s: duplicate mount (%s -> %s)", mount_point, leaf->fstype, mnt_type);
+	if (node->fstype) {
+		log_error("%s: duplicate mount (%s -> %s)", mount_point, node->fstype, mnt_type);
 		return false;
 	}
-	assert(leaf->fstype == NULL);
-	assert(leaf->fsname == NULL);
-	leaf->fstype = strdup(mnt_type);
-	leaf->fsname = strdup(fsname);
+	assert(node->fstype == NULL);
+	assert(node->fsname == NULL);
+	node->fstype = strdup(mnt_type);
+	node->fsname = strdup(fsname);
 	return true;
 }
 
@@ -93,7 +93,7 @@ mount_farm_discover_system_mounts(struct mount_farm *farm)
 {
 	struct fstree *fstree = NULL;
 	struct fstree_iter *it;
-	struct mount_leaf *leaf;
+	struct fstree_node *node;
 
 	trace("Discovering system mounts");
 
@@ -104,32 +104,32 @@ mount_farm_discover_system_mounts(struct mount_farm *farm)
 	}
 
 	it = fstree_iterator_new(fstree);
-	while ((leaf = fstree_iterator_next(it)) != NULL) {
-		struct mount_leaf *new_mount;
+	while ((node = fstree_iterator_next(it)) != NULL) {
+		struct fstree_node *new_mount;
 
-		trace("  %s", leaf->relative_path);
+		trace("  %s", node->relative_path);
 
 		/* Just an internal tree node, not a mount */
-		if (leaf->export_type == WORMHOLE_EXPORT_NONE)
+		if (node->export_type == WORMHOLE_EXPORT_NONE)
 			continue;
 
-		if (!strncmp(leaf->relative_path, "/usr", 4)
-		 || !strncmp(leaf->relative_path, "/bin", 4)
-		 || !strncmp(leaf->relative_path, "/lib", 4)
-		 || !strncmp(leaf->relative_path, "/lib64", 6)) {
-			log_warning("Ignoring mount point %s", leaf->relative_path);
+		if (!strncmp(node->relative_path, "/usr", 4)
+		 || !strncmp(node->relative_path, "/bin", 4)
+		 || !strncmp(node->relative_path, "/lib", 4)
+		 || !strncmp(node->relative_path, "/lib64", 6)) {
+			log_warning("Ignoring mount point %s", node->relative_path);
 			continue;
 		}
 
-		new_mount = mount_farm_add_transparent(farm, leaf->relative_path, NULL);
-		if (leaf->fsname && leaf->fsname[0] == '/' && fsutil_isblk(leaf->fsname)) {
+		new_mount = mount_farm_add_transparent(farm, node->relative_path, NULL);
+		if (node->fsname && node->fsname[0] == '/' && fsutil_isblk(node->fsname)) {
 			/* this is a mount of an actual block based file system */
-			trace("%s is a mount of %s", leaf->relative_path, leaf->fsname);
-			mount_leaf_set_fstype(new_mount, "bind", farm);
+			trace("%s is a mount of %s", node->relative_path, node->fsname);
+			fstree_node_set_fstype(new_mount, "bind", farm);
 		} else
-		if (new_mount->fstype == NULL || !strcmp(new_mount->fstype, leaf->fstype)) {
+		if (new_mount->fstype == NULL || !strcmp(new_mount->fstype, node->fstype)) {
 			/* Most likely a virtual FS */
-			mount_leaf_set_fstype(new_mount, leaf->fstype, farm);
+			fstree_node_set_fstype(new_mount, node->fstype, farm);
 		}
 	}
 
@@ -141,20 +141,20 @@ mount_farm_discover_system_mounts(struct mount_farm *farm)
 static bool
 mount_farm_apply_quirks(struct mount_farm *farm)
 {
-	struct mount_leaf *leaf;
+	struct fstree_node *node;
 
 	/* In some configurations, /dev will not be a devfs but just a regular directory
 	 * with some static files in it. Catch this case. */
-	if (!(leaf = mount_farm_add_transparent(farm, "/dev", NULL)))
+	if (!(node = mount_farm_add_transparent(farm, "/dev", NULL)))
 		return false;
 
-	if (leaf->fstype == NULL)
-		mount_leaf_set_fstype(leaf, "bind", farm);
+	if (node->fstype == NULL)
+		fstree_node_set_fstype(node, "bind", farm);
 
-	if (!(leaf = mount_farm_add_transparent(farm, "/tmp", NULL)))
+	if (!(node = mount_farm_add_transparent(farm, "/tmp", NULL)))
 		return false;
 
-	mount_leaf_set_fstype(leaf, "tmpfs", farm);
+	fstree_node_set_fstype(node, "tmpfs", farm);
 
 	trace("Assembled tree:");
 	mount_tree_print(farm->tree->root);
@@ -167,17 +167,17 @@ static bool
 mount_farm_fill_holes(struct mount_farm *farm)
 {
 	struct fstree_iter *it;
-	struct mount_leaf *leaf;
+	struct fstree_node *node;
 	bool okay = true;
 
 	trace("Completing system mounts");
 	it = fstree_iterator_new(farm->tree);
-	while (okay && (leaf = fstree_iterator_next(it)) != NULL) {
+	while (okay && (node = fstree_iterator_next(it)) != NULL) {
 		/* Just an internal tree node, not a mount */
-		if (leaf->export_type == WORMHOLE_EXPORT_ROOT) {
+		if (node->export_type == WORMHOLE_EXPORT_ROOT) {
 			/* It's a static directory at the tree root. Make sure it
 			 * exists. */
-			okay = mount_farm_add_missing_children(farm, leaf->relative_path);
+			okay = mount_farm_add_missing_children(farm, node->relative_path);
 			continue;
 		}
 	}
@@ -620,7 +620,7 @@ __prune_callback(const char *dir_path, const struct dirent *d, int flags, void *
 	struct prune_ctx *prune = closure;
 	const char *relative_path;
 	char *full_path = NULL;
-	struct mount_leaf *mount;
+	struct fstree_node *mount;
 
 	if (d->d_type != DT_DIR)
 		return FTW_CONTINUE;
@@ -634,8 +634,8 @@ __prune_callback(const char *dir_path, const struct dirent *d, int flags, void *
 	if (mount) {
 		bool try_to_prune = false;
 
-		if (mount_leaf_is_mountpoint(mount)
-		 || !mount_leaf_is_below_mountpoint(mount))
+		if (fstree_node_is_mountpoint(mount)
+		 || !fstree_node_is_below_mountpoint(mount))
 			try_to_prune = true;
 
 		if (try_to_prune && rmdir(full_path) == 0)
