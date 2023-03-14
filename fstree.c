@@ -291,6 +291,7 @@ mount_leaf_build_lowerspec(const struct mount_leaf *leaf)
 	unsigned int n;
 	char *result;
 
+	trace3("%s(%s): %u layers", __func__, leaf->relative_path, layers->count);
 	for (n = 0; n < layers->count; ++n) {
 		struct wormhole_layer *layer = layers->data[n];
 

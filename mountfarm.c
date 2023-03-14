@@ -193,7 +193,9 @@ __mount_farm_percolate(struct mount_leaf *node, struct mount_leaf *closest_ances
 	struct mount_leaf *child;
 	unsigned int i;
 
-	// trace("%s(%s [%s])", __func__, node->relative_path, mount_export_type_as_string(node->export_type));
+	trace3("%*.*s%s(%s [%s])",
+			node->depth, node->depth, "",
+			__func__, node->relative_path, mount_export_type_as_string(node->export_type));
 	if (node->export_type == WORMHOLE_EXPORT_STACKED) {
 		unsigned int n = 0;
 
@@ -216,6 +218,7 @@ __mount_farm_percolate(struct mount_leaf *node, struct mount_leaf *closest_ances
 			}
 		}
 	}
+
 
 #define EXPORT_COMBINATION(ancestor, self) \
 	((WORMHOLE_EXPORT_##ancestor) << 8 | (WORMHOLE_EXPORT_##self))
@@ -261,6 +264,7 @@ __mount_farm_percolate(struct mount_leaf *node, struct mount_leaf *closest_ances
 		/* A stacked mount inside a stacked mount - just transfer the layers
 		 * attached here to the ancestor.
 		 */
+		trace2("Moving attached layers of %s to %s", node->relative_path, closest_ancestor->relative_path);
 		for (i = 0; i < node->attached_layers.count; ++i) {
 			struct wormhole_layer *layer = node->attached_layers.data[i];
 
