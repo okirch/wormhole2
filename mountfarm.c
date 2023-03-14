@@ -140,7 +140,7 @@ __mount_farm_fudge_non_directory(struct mount_leaf *node, struct mount_leaf *clo
 	node->dtype = dtype;
 
 	if (closest_ancestor->export_type == WORMHOLE_EXPORT_TRANSPARENT) {
-		/* We get here eg for /etc/passwd.
+		/* We get here eg for /etc/passwd if /etc is transparent.
 		 * Transform this into a bind mount.
 		 */
 		if (dtype != DT_REG)
@@ -156,9 +156,33 @@ __mount_farm_fudge_non_directory(struct mount_leaf *node, struct mount_leaf *clo
 		return true;
 	} else
 	if (closest_ancestor->export_type == WORMHOLE_EXPORT_STACKED) {
-		/* We could deal with this situation y copying the file
-		 * in question to the ancestor's upperdir.
+		/* We get here eg for /etc/passwd if /etc is stacked.
+		 * Copy the file in question to the ancestor's upperdir.
 		 */
+		char *src_path = NULL, *relative_path = NULL, *dst_path = NULL;
+		bool ok;
+
+		if (dtype != DT_REG)
+			return false;
+
+		relative_path = mount_leaf_relative_path(closest_ancestor, node);
+
+		if (!mount_leaf_zap_dirs(node))
+			return false;
+
+		pathutil_concat2(&src_path, layer->image_path, node->relative_path);
+		pathutil_concat2(&dst_path, closest_ancestor->upper, relative_path);
+		ok = fsutil_copy_file(src_path, dst_path, NULL);
+		strutil_drop(&src_path);
+		strutil_drop(&dst_path);
+		strutil_drop(&relative_path);
+
+		if (!ok)
+			return false;
+
+		/* We transferred the file to the ancestor, so this node is no longer relevant */
+		node->export_type = WORMHOLE_EXPORT_NONE;
+		strutil_drop(&node->fstype);
 	}
 
 	return false;
