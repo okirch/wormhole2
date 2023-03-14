@@ -172,65 +172,6 @@ __image_update_attrs(const char *image_path, const struct stat *stb)
 }
 
 static bool
-copy_file(const char *system_path, const char *image_path, const struct stat *st)
-{
-	char buffer[65536];
-	unsigned long copied = 0;
-	int srcfd = -1, dstfd = -1;
-	int rcount;
-	bool ok = false;
-
-	srcfd = open(system_path, O_RDONLY);
-	if (srcfd < 0) {
-		log_error("%s: unable to open file: %m", system_path);
-		return false;
-	}
-
-	unlink(image_path);
-
-	dstfd = open(image_path, O_CREAT | O_WRONLY | O_TRUNC, st->st_mode & 0777);
-	if (dstfd < 0) {
-		if (errno == ENOENT) {
-			const char *parent_path = pathutil_dirname(image_path);
-			(void) fsutil_makedirs(parent_path, 0755);
-			dstfd = open(image_path, O_CREAT | O_WRONLY | O_TRUNC, st->st_mode & 0777);
-		}
-
-		if (dstfd < 0) {
-			log_error("%s: unable to create file: %m", image_path);
-			close(srcfd);
-			return false;
-		}
-	}
-
-	while ((rcount = read(srcfd, buffer, sizeof(buffer))) > 0) {
-		int written = 0, wcount;
-
-		while (written < rcount) {
-			wcount = write(dstfd, buffer + written, rcount - written);
-			if (wcount < 0) {
-				log_error("%s: write error: %m", image_path);
-				goto failed;
-			}
-
-			written += wcount;
-		}
-
-		copied += rcount;
-	}
-
-	trace("%s: copied %lu bytes", image_path, copied);
-	ok = true;
-
-failed:
-	if (srcfd >= 0)
-		close(srcfd);
-	if (dstfd >= 0)
-		close(dstfd);
-	return ok;
-}
-
-static bool
 __image_copy(const char *image_root, const char *src_path, const char *relative_src_path, int dt_type, const struct stat *st)
 {
 	const char *image_path;
@@ -250,7 +191,7 @@ __image_copy(const char *image_root, const char *src_path, const char *relative_
 	} else
 	if (dt_type == DT_REG) {
 		trace2("copy regular file %s", image_path);
-		if (!copy_file(src_path, image_path, st))
+		if (!fsutil_copy_file(src_path, image_path, st))
 			return false;
 	} else
 	if (dt_type == DT_LNK) {
