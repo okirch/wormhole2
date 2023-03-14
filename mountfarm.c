@@ -167,8 +167,11 @@ __mount_farm_fudge_non_directory(struct mount_leaf *node, struct mount_leaf *clo
 
 		relative_path = mount_leaf_relative_path(closest_ancestor, node);
 
-		if (!mount_leaf_zap_dirs(node))
-			return false;
+		/* As we're transferring the file to our ancestor, this mount is no longer
+		 * relevant. As a side effect, this removes the corresponding mount point
+		 * directory below upperdir, allowing us to copy the regular file into
+		 * upperdir at the same location. */
+		mount_leaf_invalidate(node);
 
 		pathutil_concat2(&src_path, layer->image_path, node->relative_path);
 		pathutil_concat2(&dst_path, closest_ancestor->upper, relative_path);
@@ -179,9 +182,6 @@ __mount_farm_fudge_non_directory(struct mount_leaf *node, struct mount_leaf *clo
 
 		if (!ok)
 			return false;
-
-		/* We transferred the file to the ancestor, so this node is no longer relevant */
-		mount_leaf_invalidate(node);
 	}
 
 	return false;
