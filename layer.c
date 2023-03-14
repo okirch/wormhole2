@@ -248,7 +248,7 @@ wormhole_layer_write_wrapper(struct wormhole_layer *layer, const char *app_path)
 	}
 
 	fprintf(fp, "#!/bin/bash\n");
-	fprintf(fp, "exec /usr/bin/wormhole -L \"%s\" %s \"$@\"\n",
+	fprintf(fp, "exec /usr/bin/wormhole -L \"%s\" -- %s \"$@\"\n",
 			layer->name, app_path);
 
 	fclose(fp);
