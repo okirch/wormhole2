@@ -156,6 +156,7 @@ extern char *			mount_leaf_relative_path(struct mount_leaf *ancestor, struct mou
 extern bool			mount_leaf_set_fstype(struct mount_leaf *leaf, const char *fstype, struct mount_farm *farm);
 extern bool			mount_leaf_add_lower(struct mount_leaf *leaf, const char *path);
 extern char *			mount_leaf_build_lowerspec(const struct mount_leaf *leaf);
+extern void			mount_leaf_invalidate(struct mount_leaf *leaf);
 extern bool			mount_leaf_zap_dirs(struct mount_leaf *leaf);
 extern bool			mount_leaf_mount(const struct mount_leaf *leaf);
 extern bool			mount_leaf_traverse(struct mount_leaf *node, bool (*visitorfn)(const struct mount_leaf *));

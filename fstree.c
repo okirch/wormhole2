@@ -266,6 +266,23 @@ mount_leaf_set_fstype(struct mount_leaf *leaf, const char *fstype, struct mount_
 	return leaf->upper && leaf->work && leaf->mountpoint;
 }
 
+/*
+ * Change a node from a mount to in internal, non-mount node
+ */
+void
+mount_leaf_invalidate(struct mount_leaf *leaf)
+{
+	if (leaf->export_type != WORMHOLE_EXPORT_ROOT)
+		leaf->export_type = WORMHOLE_EXPORT_NONE;
+
+	strutil_drop(&leaf->fstype);
+
+	mount_leaf_zap_dirs(leaf);
+	strutil_drop(&leaf->upper);
+	strutil_drop(&leaf->work);
+	strutil_drop(&leaf->mountpoint);
+}
+
 char *
 mount_leaf_build_lowerspec(const struct mount_leaf *leaf)
 {

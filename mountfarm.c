@@ -181,8 +181,7 @@ __mount_farm_fudge_non_directory(struct mount_leaf *node, struct mount_leaf *clo
 			return false;
 
 		/* We transferred the file to the ancestor, so this node is no longer relevant */
-		node->export_type = WORMHOLE_EXPORT_NONE;
-		strutil_drop(&node->fstype);
+		mount_leaf_invalidate(node);
 	}
 
 	return false;
@@ -268,7 +267,9 @@ __mount_farm_percolate(struct mount_leaf *node, struct mount_leaf *closest_ances
 			wormhole_layer_array_append_unique(&closest_ancestor->attached_layers, layer);
 		}
 		wormhole_layer_array_destroy(&node->attached_layers);
-		node->export_type = WORMHOLE_EXPORT_NONE;
+
+		/* No longer mount anything on this node */
+		mount_leaf_invalidate(node);
 		break;
 
 	default:
