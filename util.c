@@ -1689,6 +1689,75 @@ fsutil_make_fs_private(const char *dir, bool maybe_in_chroot)
 	return true;
 }
 
+bool
+fsutil_copy_file(const char *system_path, const char *image_path, const struct stat *st)
+{
+	struct stat _st;
+	char buffer[65536];
+	unsigned long copied = 0;
+	int srcfd = -1, dstfd = -1;
+	int rcount;
+	bool ok = false;
+
+	if (st == NULL) {
+		if (lstat(system_path, &_st) < 0) {
+			log_error("%s: unable to stat: %m", system_path);
+			return false;
+		}
+		st = &_st;
+	}
+
+	srcfd = open(system_path, O_RDONLY);
+	if (srcfd < 0) {
+		log_error("%s: unable to open file: %m", system_path);
+		return false;
+	}
+
+	unlink(image_path);
+
+	dstfd = open(image_path, O_CREAT | O_WRONLY | O_TRUNC, st->st_mode & 0777);
+	if (dstfd < 0) {
+		if (errno == ENOENT) {
+			const char *parent_path = pathutil_dirname(image_path);
+			(void) fsutil_makedirs(parent_path, 0755);
+			dstfd = open(image_path, O_CREAT | O_WRONLY | O_TRUNC, st->st_mode & 0777);
+		}
+
+		if (dstfd < 0) {
+			log_error("%s: unable to create file: %m", image_path);
+			close(srcfd);
+			return false;
+		}
+	}
+
+	while ((rcount = read(srcfd, buffer, sizeof(buffer))) > 0) {
+		int written = 0, wcount;
+
+		while (written < rcount) {
+			wcount = write(dstfd, buffer + written, rcount - written);
+			if (wcount < 0) {
+				log_error("%s: write error: %m", image_path);
+				goto failed;
+			}
+
+			written += wcount;
+		}
+
+		copied += rcount;
+	}
+
+	trace("%s: copied %lu bytes", image_path, copied);
+	ok = true;
+
+failed:
+	if (srcfd >= 0)
+		close(srcfd);
+	if (dstfd >= 0)
+		close(dstfd);
+	return ok;
+}
+
+
 const char *
 fsutil_get_filesystem_type(const char *path)
 {

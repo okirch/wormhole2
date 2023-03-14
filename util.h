@@ -140,6 +140,7 @@ extern bool			fsutil_same_file(const char *path1, const char *path2);
 extern bool			fsutil_dir_is_mountpoint(const char *path);
 extern const char *		fsutil_makedir2(const char *parent, const char *name);
 extern const char *		fsutil_makefile2(const char *parent, const char *name);
+extern bool			fsutil_copy_file(const char *system_path, const char *image_path, const struct stat *st);
 
 static inline const char *
 __fsutil_concat2(const char *parent, const char *name)
