@@ -149,12 +149,14 @@ extern void			mount_farm_print_tree(struct mount_farm *farm);
 
 extern void			mount_leaf_free(struct mount_leaf *leaf);
 extern struct mount_leaf *	mount_leaf_new(const char *name, const char *relative_path);
-extern bool		mount_leaf_is_mountpoint(const struct mount_leaf *leaf);
-extern bool		mount_leaf_is_below_mountpoint(const struct mount_leaf *leaf);
+extern bool			mount_leaf_is_mountpoint(const struct mount_leaf *leaf);
+extern bool			mount_leaf_is_below_mountpoint(const struct mount_leaf *leaf);
 extern struct mount_leaf *	mount_leaf_lookup(struct mount_leaf *parent, const char *relative_path, bool create);
+extern char *			mount_leaf_relative_path(struct mount_leaf *ancestor, struct mount_leaf *node);
 extern bool			mount_leaf_set_fstype(struct mount_leaf *leaf, const char *fstype, struct mount_farm *farm);
 extern bool			mount_leaf_add_lower(struct mount_leaf *leaf, const char *path);
 extern char *			mount_leaf_build_lowerspec(const struct mount_leaf *leaf);
+extern bool			mount_leaf_zap_dirs(struct mount_leaf *leaf);
 extern bool			mount_leaf_mount(const struct mount_leaf *leaf);
 extern bool			mount_leaf_traverse(struct mount_leaf *node, bool (*visitorfn)(const struct mount_leaf *));
 extern void			mount_tree_print(struct mount_leaf *leaf);

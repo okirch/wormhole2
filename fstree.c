@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h> /* just for mount_leaf_zap_dirs() */
 #include <assert.h>
 
 #include "wormhole2.h"
@@ -192,6 +193,55 @@ mount_leaf_lookup(struct mount_leaf *parent, const char *relative_path, bool cre
 	}
 
 	return leaf;
+}
+
+char *
+mount_leaf_relative_path(struct mount_leaf *ancestor, struct mount_leaf *node)
+{
+	char relative_path[PATH_MAX + 1];
+	unsigned int pos, n;
+
+	pos = sizeof(relative_path);
+	relative_path[--pos] = '\0';
+
+	while (node != ancestor) {
+		n = strlen(node->name);
+
+		if (pos < n + 1)
+			return NULL;
+		if (relative_path[pos] != '\0')
+			relative_path[--pos] = '/';
+		pos -= n;
+		memcpy(&relative_path[pos], node->name, n);
+
+		node = node->parent;
+	}
+
+	return strdup(&relative_path[pos]);
+}
+
+bool
+mount_leaf_zap_dirs(struct mount_leaf *leaf)
+{
+	const char *to_zap[10];
+	unsigned int i = 0;
+
+	if (leaf->upper)
+		to_zap[i++] = leaf->upper;
+	if (leaf->work)
+		to_zap[i++] = leaf->work;
+	if (leaf->mountpoint)
+		to_zap[i++] = leaf->mountpoint;
+
+	while (i--) {
+		const char *dir = to_zap[i];
+		if (rmdir(dir) < 0 && errno != ENOENT) {
+			log_error("cannot remove %s: %m", dir);
+			return false;
+		}
+	}
+
+	return true;
 }
 
 bool
