@@ -295,7 +295,7 @@ fstree_node_build_lowerspec(const struct fstree_node *node)
 	for (n = 0; n < layers->count; ++n) {
 		struct wormhole_layer *layer = layers->data[n];
 
-		strutil_array_append(&dirs, __fsutil_concat2(layer->image_path, node->relative_path));
+		strutil_array_append(&dirs, __pathutil_concat2(layer->image_path, node->relative_path));
 	}
 
 	if (dirs.count == 0) {
@@ -336,7 +336,7 @@ fstree_node_mount(const struct fstree_node *node)
 			const char *bind_source = node->relative_path;
 
 			if (node->bind_mount_override_layer)
-				bind_source = __fsutil_concat2(node->bind_mount_override_layer->image_path, bind_source);
+				bind_source = __pathutil_concat2(node->bind_mount_override_layer->image_path, bind_source);
 
 			trace("Binding mounting %s on %s\n", bind_source, node->relative_path);
 			return fsutil_mount_bind(bind_source, node->mountpoint, false);

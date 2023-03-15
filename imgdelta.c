@@ -187,7 +187,7 @@ __image_copy(const char *image_root, const char *src_path, const char *relative_
 	if (st == NULL && !(st = do_stat(src_path, &_stb)))
 		return false;
 
-	image_path = __fsutil_concat2(image_root, relative_src_path);
+	image_path = __pathutil_concat2(image_root, relative_src_path);
 	if (dt_type == DT_DIR) {
 		trace2("create dir %s", image_path);
 		if (!fsutil_makedirs(image_path, st->st_mode)) {
@@ -272,7 +272,7 @@ image_compare_copy(struct imgdelta_config *cfg, const char *image_root, struct f
 
 	assert(cursor && cursor->st);
 
-	image_path = __fsutil_concat2(image_root, cursor->path);
+	image_path = __pathutil_concat2(image_root, cursor->path);
 	if (do_stat(image_path, &image_stb)) {
 		bits_changed = detect_changes(cursor->path, cursor->st, image_path, &image_stb);
 		bits_changed &= ~(cfg->ignore_change_mask);
@@ -526,7 +526,7 @@ update_image_work(struct imgdelta_config *cfg, const char *tpath)
 		for (i = 0; i < cfg->transparent_mounts.count; ++i) {
 			const char *dir_path = cfg->transparent_mounts.data[i];
 
-			if (!fsutil_makedirs(__fsutil_concat2(overlay, dir_path), 0755))
+			if (!fsutil_makedirs(__pathutil_concat2(overlay, dir_path), 0755))
 				rv = 1;
 		}
 
@@ -606,7 +606,7 @@ create_mount_farm_for_layer(struct wormhole_layer *layer, struct imgdelta_config
 		/* FIXME: it would be better to move this check to a later stage. If we
 		 * do it here, we may miss some consistency problems. */
 		if (!layer->is_root) {
-			const char *full_path = __fsutil_concat2(layer->image_path, dir_path);
+			const char *full_path = __pathutil_concat2(layer->image_path, dir_path);
 
 			if (!fsutil_exists(full_path) || fsutil_dir_is_empty(full_path)) {
 				trace("layer %s does not provide %s", layer->name, dir_path);

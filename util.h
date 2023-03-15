@@ -145,7 +145,7 @@ extern const char *		fsutil_makefile2(const char *parent, const char *name);
 extern bool			fsutil_copy_file(const char *system_path, const char *image_path, const struct stat *st);
 
 static inline const char *
-__fsutil_concat2(const char *parent, const char *name)
+__pathutil_concat2(const char *parent, const char *name)
 {
         static char path[PATH_MAX];
 

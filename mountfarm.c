@@ -208,7 +208,7 @@ __mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_anc
 
 		for (n = node->attached_layers.count; n--; ) {
 			struct wormhole_layer *layer = node->attached_layers.data[n];
-			const char *image_path = __fsutil_concat2(layer->image_path, node->relative_path);
+			const char *image_path = __pathutil_concat2(layer->image_path, node->relative_path);
 			int dtype;
 
 			if ((dtype = fsutil_get_dtype(image_path)) >= 0) {
@@ -378,7 +378,7 @@ mount_farm_add_missing_children(struct mount_farm *farm, const char *system_path
 
 		child = fstree_node_lookup(dir_node, d->d_name, false);
 		if (child == NULL) {
-			child = mount_farm_add_transparent(farm, __fsutil_concat2(system_path, d->d_name), NULL);
+			child = mount_farm_add_transparent(farm, __pathutil_concat2(system_path, d->d_name), NULL);
 			if (child == NULL) {
 				log_error("%s: cannot add transparent mount for %s/%s", __func__, system_path, d->d_name);
 				goto out;

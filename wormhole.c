@@ -42,7 +42,7 @@ bool			wormhole_in_chroot = false;
 static char *
 concat_path(const char *parent, const char *name)
 {
-	const char *path = __fsutil_concat2(parent, name);
+	const char *path = __pathutil_concat2(parent, name);
 
 	if (path)
 		return strdup(path);
@@ -627,8 +627,8 @@ __perform_boot(struct wormhole_context *ctx)
 		goto out;
 	}
 
-	if (!fsutil_mount_bind("/dev", __fsutil_concat2(root_dir, "/dev"), true)
-	 || !fsutil_mount_bind("/sys", __fsutil_concat2(root_dir, "/sys"), true))
+	if (!fsutil_mount_bind("/dev", __pathutil_concat2(root_dir, "/dev"), true)
+	 || !fsutil_mount_bind("/sys", __pathutil_concat2(root_dir, "/sys"), true))
 		goto out;
 
 	strutil_set(&ctx->farm->chroot, root_dir);

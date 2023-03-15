@@ -241,7 +241,7 @@ wormhole_layer_write_wrapper(struct wormhole_layer *layer, const char *app_path)
 	if (!fsutil_makedirs(layer->wrapper_path, 0755))
 		return false;
 
-	wrapper_path = __fsutil_concat2(layer->wrapper_path, basename(app_path));
+	wrapper_path = __pathutil_concat2(layer->wrapper_path, basename(app_path));
 	if (!(fp = fopen(wrapper_path, "w"))) {
 		log_error("%s: %m", wrapper_path);
 		return false;
