@@ -96,6 +96,9 @@ struct wormhole_context {
 	unsigned int		purpose;
 	int			exit_status;
 
+	/* This was the current working directory when we started. */
+	char *			working_directory;
+
 	char *			workspace;
 
 	/* This is where we remount the $layer/image directories to shorten the path names */

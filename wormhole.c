@@ -294,6 +294,7 @@ void
 wormhole_context_free(struct wormhole_context *ctx)
 {
 	fsutil_tempdir_cleanup(&ctx->temp);
+	strutil_drop(&ctx->working_directory);
 	strutil_drop(&ctx->workspace);
 	strutil_drop(&ctx->build_target);
 	strutil_drop(&ctx->build_root);
@@ -318,6 +319,8 @@ wormhole_context_new(void)
 	ctx = calloc(1, sizeof(*ctx));
 	ctx->purpose = PURPOSE_NONE;
 	ctx->exit_status = 5;
+
+	ctx->working_directory = get_current_dir_name();
 
 	fsutil_tempdir_init(&ctx->temp);
 	if (!(workspace = fsutil_tempdir_path(&ctx->temp))) {
@@ -981,9 +984,13 @@ main(int argc, char **argv)
 
 	trace("debug level set to %u\n", tracing_level);
 
-	if (optind < argc)
+	if (optind < argc) {
 		wormhole_context_set_command(ctx, argv + optind);
-	else
+
+		/* Set the working directory so that relative path name arguments
+		 * continue to work. */
+		ctx->command.working_directory = ctx->working_directory;
+	} else
 	if (ctx->purpose == PURPOSE_BUILD || ctx->purpose == PURPOSE_USE)
 		log_fatal("Missing command to be executed\n");
 

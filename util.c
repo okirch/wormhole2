@@ -279,8 +279,8 @@ procutil_command_exec(struct procutil_command *cmd, const char *command)
 
 	if (cmd->working_directory) {
 		if (chdir(cmd->working_directory) < 0) {
-			log_error("Unable to chdir to %s: %m", cmd->working_directory);
-			exit(69);
+			warning("Unable to chdir to %s: %m", cmd->working_directory);
+			(void) chdir("/");
 		}
 	}
 
