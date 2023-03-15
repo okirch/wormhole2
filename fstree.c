@@ -130,6 +130,15 @@ fstree_make_relative(struct fstree *fstree, const char *common_root)
 	return true;
 }
 
+const char *
+fstree_get_full_path(struct fstree *fstree, const char *relative_path)
+{
+	struct fstree_node *node;
+
+	node = fstree_node_lookup(fstree->root, relative_path, true);
+	return node->full_path;
+}
+
 void
 fstree_node_free(struct fstree_node *node)
 {

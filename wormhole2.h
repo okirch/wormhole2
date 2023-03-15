@@ -127,6 +127,7 @@ extern void			fstree_free(struct fstree *fstree);
 extern struct fstree_node *	fstree_create_leaf(struct fstree *fstree, const char *relative_path);
 extern bool			fstree_make_relative(struct fstree *fstree,
 					const char *common_root);
+extern const char *		fstree_get_full_path(struct fstree *fstree, const char *relative_path);
 extern bool			fstree_discover(const char *mtab,
 					bool (*report_fn)(void *user_data,
 							const char *mount_point,
