@@ -85,51 +85,6 @@ fstree_create_leaf(struct fstree *fstree, const char *relative_path)
 	return fstree_node_lookup(fstree->root, relative_path, true);
 }
 
-static bool
-__fstree_make_relative_paths(struct fstree_node *node, const char *common_root, unsigned int len)
-{
-	struct fstree_node *child;
-	bool okay = true;
-
-	if (memcmp(node->relative_path, common_root, len))
-		goto bad_path;
-
-	if (node->relative_path[len] == '\0')
-		strutil_set(&node->relative_path, "/");
-	else
-	if (node->relative_path[len] != '/')
-		goto bad_path;
-	else
-		strutil_set(&node->relative_path, node->relative_path + len);
-
-	// trace(" %s -> %s", node->full_path, node->relative_path);
-	for (child = node->children; okay && child; child = child->next)
-		okay = __fstree_make_relative_paths(child, common_root, len);
-
-	return okay;
-
-bad_path:
-	log_error("%s is not relative to %s\n", node->relative_path, common_root);
-	return false;
-}
-
-bool
-fstree_make_relative(struct fstree *fstree, const char *common_root)
-{
-	struct fstree_node *layer_root;
-
-	layer_root = fstree_node_lookup(fstree->root, common_root, false);
-	if (!layer_root)
-		return false;
-
-	if (!__fstree_make_relative_paths(layer_root, common_root, strlen(common_root)))
-		return false;
-
-	/* XXX: we leak some memory here */
-	fstree->root = layer_root;
-	return true;
-}
-
 const char *
 fstree_get_full_path(struct fstree *fstree, const char *relative_path)
 {
