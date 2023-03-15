@@ -1643,11 +1643,16 @@ out:
 bool
 fsutil_mount_overlay(const char *lowerdir, const char *upperdir, const char *workdir, const char *target)
 {
+	struct fsutil_tempdir empty;
 	char options[3 * PATH_MAX];
 	int flags = 0;
 
+	fsutil_tempdir_init(&empty);
 	if (upperdir == NULL) {
-		snprintf(options, sizeof(options), "lowerdir=%s", lowerdir);
+		if (!fsutil_tempdir_mount(&empty))
+			return false;
+
+		snprintf(options, sizeof(options), "lowerdir=%s:%s", fsutil_tempdir_path(&empty), lowerdir);
 		flags |= MS_RDONLY;
 	} else {
 		snprintf(options, sizeof(options), "lowerdir=%s,upperdir=%s,workdir=%s",
@@ -1665,10 +1670,12 @@ fsutil_mount_overlay(const char *lowerdir, const char *upperdir, const char *wor
 	if (mount("wormhole", target, "overlay", flags, options) < 0) {
 		log_error("Cannot mount overlayfs at %s: %m", target);
 		trace("Options string was \"%s\"", options);
+		fsutil_tempdir_cleanup(&empty);
 		return false;
 	}
 
-	trace2("mounted overlay of %s and %s to %s", lowerdir, upperdir, target);
+	trace2("Successfully mounted overlay of %s and %s to %s", lowerdir, upperdir, target);
+	fsutil_tempdir_cleanup(&empty);
 	return true;
 }
 
@@ -1681,11 +1688,11 @@ fsutil_mount_bind(const char *source, const char *target, bool recursive)
 		flags |= MS_REC;
 
 	if (mount(source, target, NULL, flags, NULL) < 0) {
-		log_error("Unable to bind mount %s to %s: %m", source, target);
+		log_error("Unable to bind mount %s on %s: %m", source, target);
 		return false;
 	}
 
-	trace2("bind mounted %s to %s", source, target);
+	trace2("Successfully bind mounted %s to %s", source, target);
 	return true;
 }
 
@@ -1694,13 +1701,12 @@ fsutil_mount_virtual_fs(const char *where, const char *fstype, const char *optio
 {
 	int flags = 0;
 
-	trace("Mounting %s at %s\n", fstype, where);
 	if (mount(fstype, where, fstype, flags, options) < 0) {
-		log_error("Unable to mount %s file system to %s: %m", fstype, where);
+		log_error("Unable to mount %s file system on %s: %m", fstype, where);
 		return false;
 	}
 
-	trace2("mounted %s to %s", fstype, where);
+	trace2("Successfully mounted %s virtual file system on %s", fstype, where);
 	return true;
 }
 
@@ -1711,6 +1717,7 @@ fsutil_mount_tmpfs(const char *where)
 	if (mount("tmpfs", where, "tmpfs", 0, NULL) < 0)
 		return false;
 
+	trace2("Successfully mounted tmpfs on %s", where);
 	return true;
 }
 
