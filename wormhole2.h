@@ -140,7 +140,7 @@ extern struct fstree_node *	fstree_add_export(struct fstree *fstree, const char 
 					unsigned int export_type, struct wormhole_layer *layer);
 extern void			fstree_print(struct fstree *tree);
 
-extern struct fstree_iter *	fstree_iterator_new(struct fstree *fstree);
+extern struct fstree_iter *	fstree_iterator_new(struct fstree *fstree, bool depth_first);
 extern struct fstree_node *	fstree_iterator_next(struct fstree_iter *);
 extern void			fstree_iterator_skip(struct fstree_iter *, struct fstree_node *);
 extern void			fstree_iterator_free(struct fstree_iter *);

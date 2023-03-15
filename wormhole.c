@@ -101,7 +101,7 @@ mount_farm_discover_system_mounts(struct mount_farm *farm)
 		return false;
 	}
 
-	it = fstree_iterator_new(fstree);
+	it = fstree_iterator_new(fstree, false);
 	while ((node = fstree_iterator_next(it)) != NULL) {
 		struct fstree_node *new_mount;
 
@@ -169,7 +169,7 @@ mount_farm_fill_holes(struct mount_farm *farm)
 	bool okay = true;
 
 	trace("Completing system mounts");
-	it = fstree_iterator_new(farm->tree);
+	it = fstree_iterator_new(farm->tree, false);
 	while (okay && (node = fstree_iterator_next(it)) != NULL) {
 		/* Just an internal tree node, not a mount */
 		if (node->export_type == WORMHOLE_EXPORT_ROOT) {

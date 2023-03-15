@@ -446,16 +446,24 @@ struct fstree_iter {
 	struct fstree_node *	current;
 	struct fstree_node *	next;
 	int			direction;
+	bool			depth_first;
 };
 
 struct fstree_iter *
-fstree_iterator_new(struct fstree *fstree)
+fstree_iterator_new(struct fstree *fstree, bool depth_first)
 {
 	struct fstree_iter *it;
 
 	it = calloc(1, sizeof(*it));
 	it->next = fstree->root;
-	it->direction = TREE_ITER_DOWN;
+	it->depth_first = depth_first;
+	it->direction = TREE_ITER_DOWN | TREE_ITER_RIGHT;
+
+	if (depth_first) {
+		while (it->next->children)
+			it->next = it->next->children;
+	}
+
 	return it;
 }
 
@@ -479,12 +487,36 @@ __fstree_iterator_next(struct fstree_node *current, unsigned int dir_mask)
 	return next;
 }
 
+static struct fstree_node *
+__fstree_iterator_next_df(struct fstree_node *current)
+{
+	struct fstree_node *next = current;
+
+	while (next) {
+		if (next->next) {
+			next = next->next;
+
+			/* go all the way to the bottom */
+			while (next->children)
+				next = next->children;
+			break;
+		}
+
+		return next->parent;
+	}
+
+	return next;
+}
+
 struct fstree_node *
 fstree_iterator_next(struct fstree_iter *it)
 {
 	struct fstree_node *current = it->next;
 
-	it->next = __fstree_iterator_next(it->next, TREE_ITER_DOWN | TREE_ITER_RIGHT);
+	if (it->depth_first)
+		it->next = __fstree_iterator_next_df(it->next);
+	else
+		it->next = __fstree_iterator_next(it->next, TREE_ITER_DOWN | TREE_ITER_RIGHT);
 	it->current = current;
 	return current;
 }
@@ -492,6 +524,9 @@ fstree_iterator_next(struct fstree_iter *it)
 void
 fstree_iterator_skip(struct fstree_iter *it, struct fstree_node *node)
 {
+	if (it->depth_first)
+		return;
+
 	if (it->current == node) {
 		/* Force a move up and then right */
 		it->next = __fstree_iterator_next(it->current, 0);
