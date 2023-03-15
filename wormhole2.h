@@ -23,8 +23,13 @@ struct mount_farm {
 	struct fstree *tree;
 };
 
+struct fsroot {
+	char *		path;
+};
+
 struct fstree {
-	struct fstree_node *root;
+	struct fsroot *		root_location;
+	struct fstree_node *	root;		/* FIXME: rename to root_node */
 };
 
 #define MOUNT_LEAF_LOWER_MAX	8
@@ -42,6 +47,7 @@ struct fstree_node {
 	struct fstree_node *next;
 	struct fstree_node *children;
 
+	const struct fsroot *root;
 	bool		readonly;
 	bool		nonempty;
 
@@ -116,7 +122,7 @@ struct wormhole_context {
 	struct fsutil_tempdir	temp;
 };
 
-struct fstree *			fstree_new(void);
+struct fstree *			fstree_new(const char *root_path);
 extern void			fstree_free(struct fstree *fstree);
 extern struct fstree_node *	fstree_create_leaf(struct fstree *fstree, const char *relative_path);
 extern bool			fstree_make_relative(struct fstree *fstree,
@@ -154,7 +160,7 @@ extern bool			mount_farm_mount_into(struct mount_farm *farm, const char *src, co
 extern void			mount_farm_print_tree(struct mount_farm *farm);
 
 extern void			fstree_node_free(struct fstree_node *leaf);
-extern struct fstree_node *	fstree_node_new(const char *name, const char *relative_path);
+extern struct fstree_node *	fstree_node_new(const char *name, const char *relative_path, const struct fsroot *root);
 extern bool			fstree_node_is_mountpoint(const struct fstree_node *leaf);
 extern bool			fstree_node_is_below_mountpoint(const struct fstree_node *leaf);
 extern struct fstree_node *	fstree_node_lookup(struct fstree_node *parent, const char *relative_path, bool create);

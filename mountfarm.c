@@ -45,13 +45,14 @@ mount_farm_new(const char *farm_root)
 	struct mount_farm *farm;
 
 	farm = calloc(1, sizeof(*farm));
-	farm->tree = fstree_new();
 
 	(void) fsutil_makedirs(farm_root, 0755);
 
 	pathutil_concat2(&farm->upper_base, farm_root, "upper");
 	pathutil_concat2(&farm->work_base, farm_root, "work");
 	pathutil_concat2(&farm->chroot, farm_root, "root");
+
+	farm->tree = fstree_new(farm->chroot);
 
 	return farm;
 }

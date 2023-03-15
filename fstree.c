@@ -30,14 +30,35 @@
 #include "tracing.h"
 #include "util.h"
 
+struct fsroot *
+fsroot_new(const char *root_path)
+{
+	struct fsroot *fsroot;
+
+	fsroot = calloc(1, sizeof(*fsroot));
+	strutil_set(&fsroot->path, root_path);
+	return fsroot;
+}
+
+void
+fsroot_free(struct fsroot *fsroot)
+{
+	strutil_drop(&fsroot->path);
+	free(fsroot);
+}
 
 struct fstree *
-fstree_new(void)
+fstree_new(const char *root_path)
 {
+	struct fsroot *root_location = NULL;
 	struct fstree *fstree;
 
+	if (root_path)
+		root_location = fsroot_new(root_path);
+
 	fstree = calloc(1, sizeof(*fstree));
-	fstree->root = fstree_node_new("", "/");
+	fstree->root_location = root_location;
+	fstree->root = fstree_node_new("", "/", root_location);
 
 	return fstree;
 }
@@ -50,6 +71,11 @@ fstree_free(struct fstree *fstree)
 	if ((root = fstree->root) != NULL) {
 		fstree_node_free(root);
 		fstree->root = NULL;
+	}
+
+	if (fstree->root_location) {
+		fsroot_free(fstree->root_location);
+		fstree->root_location = NULL;
 	}
 }
 
@@ -124,14 +150,21 @@ fstree_node_free(struct fstree_node *node)
 }
 
 struct fstree_node *
-fstree_node_new(const char *name, const char *relative_path)
+fstree_node_new(const char *name, const char *relative_path, const struct fsroot *root)
 {
 	struct fstree_node *node;
 
 	node = calloc(1, sizeof(*node));
+	node->root = root;
 	node->name = strdup(name);
 	node->relative_path = strdup(relative_path);
-	node->full_path = strdup(relative_path);
+
+	if (root) {
+		pathutil_concat2(&node->full_path, root->path, relative_path);
+	} else {
+		strutil_set(&node->full_path, relative_path);
+	}
+
 	node->dtype = -1;
 
 	return node;
@@ -181,7 +214,7 @@ fstree_node_lookup(struct fstree_node *parent, const char *relative_path, bool c
 				break;
 
 			// trace3("Creating node for %s as child of %s\n", path_parser.pathbuf, parent->relative_path);
-			node = fstree_node_new(path_parser.namebuf, path_parser.pathbuf);
+			node = fstree_node_new(path_parser.namebuf, path_parser.pathbuf, parent->root);
 			node->depth = parent->depth + 1;
 
 			node->parent = parent;

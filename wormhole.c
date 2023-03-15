@@ -97,7 +97,7 @@ mount_farm_discover_system_mounts(struct mount_farm *farm)
 
 	trace("Discovering system mounts");
 
-	fstree = fstree_new();
+	fstree = fstree_new(NULL);
 	if (!fstree_discover(NULL, __mount_farm_discover_callback, fstree)) {
 		log_error("Mount state discovery failed\n");
 		return false;
