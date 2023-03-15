@@ -118,6 +118,7 @@ struct wormhole_context {
 
 	bool			manage_rpmdb;
 	bool			use_privileged_namespace;
+	bool			running_inside_chroot;
 
 	struct fsutil_tempdir	temp;
 };

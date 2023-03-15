@@ -37,8 +37,6 @@
 #include "tracing.h"
 #include "util.h"
 
-bool			wormhole_in_chroot = false;
-
 static char *
 concat_path(const char *parent, const char *name)
 {
@@ -406,7 +404,7 @@ wormhole_context_detach(struct wormhole_context *ctx)
 			return false;
 	}
 
-	if (!fsutil_make_fs_private("/", wormhole_in_chroot))
+	if (!fsutil_make_fs_private("/", ctx->running_inside_chroot))
 		return false;
 
 	if (!fsutil_tempdir_mount(&ctx->temp))
@@ -508,7 +506,7 @@ wormhole_context_switch_root(struct wormhole_context *ctx)
 {
 	struct mount_farm *farm = ctx->farm;
 
-	if (wormhole_in_chroot) {
+	if (ctx->running_inside_chroot) {
 		/* Not optimal. Any mounts will propagate, and will be
 		 * visible even outside the chroot environment :-( */
 		trace2("Changing root to %s", farm->chroot);
@@ -991,7 +989,7 @@ main(int argc, char **argv)
 
 	if (!fsutil_dir_is_mountpoint("/")) {
 		log_warning("Running inside what looks like a chroot environment.");
-		wormhole_in_chroot = true;
+		ctx->running_inside_chroot = true;
 	}
 
 	switch (ctx->purpose) {
