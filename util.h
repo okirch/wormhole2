@@ -57,6 +57,13 @@ extern bool			procutil_child_status_okay(int status);
 extern bool			procutil_get_exit_status(int status, int *exit_status_p);
 extern const char *		procutil_child_status_describe(int status);
 
+enum {
+	PROCUTIL_CHILD,
+	PROCUTIL_EXITED,
+	PROCUTIL_CRASHED
+};
+extern int			procutil_fork_and_wait(int *exit_status);
+
 extern void			procutil_command_init(struct procutil_command *cmd, char **argv);
 extern bool			procutil_command_run(struct procutil_command *cmd, int *status_ret);
 extern bool			procutil_command_exec(struct procutil_command *cmd, const char *argv0);

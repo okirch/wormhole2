@@ -528,6 +528,32 @@ procutil_child_status_describe(int status)
 	return msgbuf;
 }
 
+int
+procutil_fork_and_wait(int *exit_status)
+{
+	int status;
+	pid_t pid;
+
+	pid = fork();
+	if (pid < 0)
+		log_fatal("Unable to fork: %m");
+
+        if (pid == 0)
+		return PROCUTIL_CHILD;
+
+        if (!procutil_wait_for(pid, &status)) {
+                log_error("Sub-process disappeared?");
+                return PROCUTIL_CRASHED;
+        }
+
+        if (!procutil_get_exit_status(status, exit_status)) {
+                log_error("Sub-process %s", procutil_child_status_describe(status));
+                return PROCUTIL_CRASHED;
+        }
+
+	return PROCUTIL_EXITED;
+}
+
 void
 fsutil_tempdir_init(struct fsutil_tempdir *td)
 {

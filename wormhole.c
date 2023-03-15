@@ -543,32 +543,23 @@ wormhole_context_switch_root(struct wormhole_context *ctx)
 bool
 wormhole_context_perform_in_container(struct wormhole_context *ctx, int (*fn)(struct wormhole_context *), bool nofork)
 {
+	int exit_status;
 	int status;
-	pid_t pid;
 
 	if (nofork) {
-		pid = 0;
+		status = PROCUTIL_CHILD; /* just pretend we forked */
 	} else {
-		pid = fork();
-		if (pid < 0)
-			log_fatal("Unable to fork: %m");
+		status = procutil_fork_and_wait(&ctx->exit_status);
 	}
 
-	if (pid == 0) {
-		int exit_status;
-
+	if (status == PROCUTIL_CHILD) {
 		trace("%s: executing subprocess callback %p", __func__, fn);
 		exit_status = fn(ctx);
 		trace("%s: subprocess going to terminate normally, exit status = %d", __func__, exit_status);
 		exit(exit_status);
 	}
 
-	if (!procutil_wait_for(pid, &status)) {
-		log_error("Container sub-process disappeared?");
-		return false;
-	}
-
-	if (!procutil_get_exit_status(status, &ctx->exit_status)) {
+	if (status == PROCUTIL_CRASHED) {
 		log_error("Container sub-process failed");
 		return false;
 	}
