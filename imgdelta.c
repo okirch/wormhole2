@@ -676,13 +676,13 @@ config_set_ignore_changes(struct imgdelta_config *cfg, const char *ignore_string
 
 	copy = strdup(ignore_string);
 	for (s = strtok(copy, ","); s; s = strtok(NULL, ",")) {
-		if (!strcmp(optarg, "mtime")) {
+		if (!strcmp(s, "mtime")) {
 			cfg->ignore_change_mask |= CMP_MTIME_CHANGED;
 		} else
-		if (!strcmp(optarg, "owner")) {
+		if (!strcmp(s, "owner")) {
 			cfg->ignore_change_mask |= CMP_OWNER_CHANGED;
 		} else
-		if (!strcmp(optarg, "mode")) {
+		if (!strcmp(s, "mode")) {
 			cfg->ignore_change_mask |= CMP_MODE_CHANGED;
 		} else {
 			return false;
