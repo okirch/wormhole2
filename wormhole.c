@@ -581,6 +581,42 @@ wormhole_context_perform_in_container(struct wormhole_context *ctx, int (*fn)(st
 	return true;
 }
 
+static bool
+ostree_attach(struct fstree *ostree, const char *system_path)
+{
+	const char *image_path = fstree_get_full_path(ostree, system_path);
+
+	// trace("Attaching %s as %s", system_path, image_path);
+	if (!fsutil_makedirs(image_path, 0755))
+		return false;
+	return fsutil_mount_bind(system_path, image_path, true);
+}
+
+static bool
+ostree_attach_readonly(struct fstree *ostree, const char *system_path)
+{
+	const char *image_path = fstree_get_full_path(ostree, system_path);
+
+	// trace("Attaching %s as %s (readonly)", system_path, image_path);
+	if (!fsutil_makedirs(image_path, 0755))
+		return false;
+
+	/* Attaching a system dir read-only can be achieved via an overlay with
+	 * no upperdir */
+	return fsutil_mount_overlay(system_path, NULL, NULL, image_path);
+}
+
+static bool
+ostree_attach_tmpfs(struct fstree *ostree, const char *system_path)
+{
+	const char *image_path = fstree_get_full_path(ostree, system_path);
+
+	// trace("Attaching tmpfs at %s", image_path);
+	if (!fsutil_makedirs(image_path, 0755))
+		return false;
+	return fsutil_mount_tmpfs(image_path);
+}
+
 static int
 __perform_boot(struct wormhole_context *ctx)
 {
@@ -588,15 +624,18 @@ __perform_boot(struct wormhole_context *ctx)
 		"btrfs", "ext4", "xfs", NULL,
 	};
 	const char *root_dir;
+	struct fstree *ostree;
 
 	ctx->exit_status = 100;
 
 	if (!wormhole_context_detach(ctx))
 		goto out;
 
+#if 0
 	/* make sure there's a tmpfs at /tmp */
 	if (!fsutil_mount_tmpfs("/tmp"))
 		goto out;
+#endif
 
 	if (!fsutil_makedirs("/tmp/root", 0755))
 		goto out;
@@ -627,8 +666,12 @@ __perform_boot(struct wormhole_context *ctx)
 		goto out;
 	}
 
-	if (!fsutil_mount_bind("/dev", __pathutil_concat2(root_dir, "/dev"), true)
-	 || !fsutil_mount_bind("/sys", __pathutil_concat2(root_dir, "/sys"), true))
+	ostree = fstree_new(root_dir);
+	if (!ostree_attach(ostree, "/dev")
+	 || !ostree_attach(ostree, "/sys")
+	 || !ostree_attach_tmpfs(ostree, "/tmp")
+	 || !ostree_attach_tmpfs(ostree, "/run")
+	 || !ostree_attach_readonly(ostree, "/run/udev"))
 		goto out;
 
 	strutil_set(&ctx->farm->chroot, root_dir);
@@ -639,9 +682,8 @@ __perform_boot(struct wormhole_context *ctx)
 	 * the pids of the new namespace */
 	ctx->command.procfs_mountpoint = "/proc";
 
-	if (!fsutil_mount_tmpfs("/tmp")
-	 || !fsutil_mount_tmpfs("/run"))
-		goto out;
+	/* FIXME: there may be more file systems that need to be mounted
+	 * between fork and exec, e.g. devpts */
 
 	if (ctx->command.argv == NULL) {
 		char *argv_init[] = {
@@ -845,7 +887,7 @@ do_boot(struct wormhole_context *ctx)
 		return;
 	}
 
-	trace("Booting OS");
+	trace("Booting OS image at %s", ctx->boot_device);
 	if (!wormhole_context_perform_in_container(ctx, __perform_boot, true))
 		return;
 
