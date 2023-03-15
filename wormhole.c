@@ -687,7 +687,7 @@ out:
 }
 
 static int
-__prune_build2(struct wormhole_context *ctx)
+prune_new_image(struct wormhole_context *ctx)
 {
 	char *image_root = NULL;
 	struct fstree_iter *it;
@@ -723,6 +723,7 @@ __prune_build2(struct wormhole_context *ctx)
 	fstree_iterator_free(it);
 	free(image_root);
 
+	trace("Removing work tree at %s/work", ctx->build_root);
 	fsutil_remove_recursively(__pathutil_concat2(ctx->build_root, "work"));
 	return 0;
 }
@@ -760,11 +761,51 @@ __perform_build(struct wormhole_context *ctx)
 		goto out;
 
 	trace("Now perform the pruning");
-	ctx->exit_status = __prune_build2(ctx);
+	ctx->exit_status = prune_new_image(ctx);
 
 out:
 	return ctx->exit_status;
 }
+
+static bool
+record_modified_mounts_to_layer(struct wormhole_context *ctx, struct wormhole_layer *new_layer)
+{
+	struct mount_farm *farm = ctx->farm;
+	char *image_root = NULL;
+	unsigned int i;
+
+	assert(ctx->build_root);
+
+	if (!mount_farm_set_upper_base(farm, ctx->build_root))
+		return false;
+
+	if (!wormhole_context_resolve_layers(ctx))
+		return false;
+
+	trace("Applying layers");
+	pathutil_concat2(&image_root, ctx->build_root, "image");
+	for (i = 0; i < ctx->layers.count; ++i) {
+		struct wormhole_layer *layer = ctx->layers.data[i];
+		unsigned int j;
+
+		for (j = 0; j < layer->stacked_directories.count; ++j) {
+			const char *dir_path = layer->stacked_directories.data[j];
+			const char *image_dir_path;
+
+			image_dir_path = __pathutil_concat2(image_root, dir_path);
+			if (fsutil_exists(image_dir_path)) {
+				if (!strutil_array_contains(&new_layer->stacked_directories, dir_path)) {
+					trace("  %s: add to stacked mounts", dir_path);
+					strutil_array_append(&new_layer->stacked_directories, dir_path);
+				}
+			}
+		}
+	}
+
+	free(image_root);
+	return true;
+}
+
 
 static void
 do_build(struct wormhole_context *ctx)
@@ -790,6 +831,8 @@ do_build(struct wormhole_context *ctx)
 
 		strutil_array_append(&layer->used, name);
 	}
+
+	record_modified_mounts_to_layer(ctx, layer);
 
 	if (ctx->manage_rpmdb) {
 		const char *rpmdb_orig = RPMDB_PATH;
