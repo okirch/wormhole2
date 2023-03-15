@@ -205,8 +205,7 @@ out:
 bool
 mount_farm_assemble_for_build(struct mount_farm *farm, struct wormhole_layer_array *layers)
 {
-	log_error("Currently not implemented");
-	return false;
+	return mount_farm_discover(farm, layers);
 }
 
 bool
@@ -218,20 +217,20 @@ mount_farm_assemble_for_run(struct mount_farm *farm, struct wormhole_layer_array
 static int
 run_the_command(struct wormhole_context *ctx)
 {
-	int status, exit_status;
+	int status;
 
 	trace("Running command:");
 	if (!procutil_command_run(&ctx->command, &status)) {
-		exit_status = 12;
+		ctx->exit_status = 12;
 	} else
-	if (!procutil_get_exit_status(status, &exit_status)) {
+	if (!procutil_get_exit_status(status, &ctx->exit_status)) {
 		log_error("Command %s %s", ctx->command.argv[0], procutil_child_status_describe(status));
-		exit_status = 13;
+		ctx->exit_status = 13;
 	} else {
-		trace("Command exited with status %d\n", exit_status);
+		trace("Command exited with status %d\n", ctx->exit_status);
 	}
 
-	return exit_status;
+	return ctx->exit_status;
 }
 
 enum {
@@ -688,6 +687,47 @@ out:
 }
 
 static int
+__prune_build2(struct wormhole_context *ctx)
+{
+	char *image_root = NULL;
+	struct fstree_iter *it;
+	struct fstree_node *node;
+
+	pathutil_concat2(&image_root, ctx->build_root, "image");
+
+	trace("Pruning image tree:");
+	it = fstree_iterator_new(ctx->farm->tree, true);
+	while ((node = fstree_iterator_next(it)) != NULL) {
+		const char *image_path = __pathutil_concat2(image_root, node->relative_path);
+		int dtype;
+
+		/* Don't try to remove $build_root/image */
+		if (node->parent == NULL)
+			break;
+
+		if ((dtype = fsutil_get_dtype(image_path)) < 0)
+			continue;
+
+		if (dtype == DT_DIR)
+			(void) rmdir(image_path);
+		else
+			(void) unlink(image_path);
+
+		if (fsutil_exists(image_path)) {
+			trace("  Has changes: %s", image_path);
+		} else {
+			trace2("  No changes to %s", image_path);
+		}
+	}
+
+	fstree_iterator_free(it);
+	free(image_root);
+
+	fsutil_remove_recursively(__pathutil_concat2(ctx->build_root, "work"));
+	return 0;
+}
+
+static int
 __perform_build(struct wormhole_context *ctx)
 {
 	ctx->exit_status = 100;
@@ -745,11 +785,10 @@ do_build(struct wormhole_context *ctx)
 	trace("Post-process build result");
 
 	layer = wormhole_layer_new(ctx->build_target, ctx->build_root, 0);
-	for (i = 0; i < ctx->layers.count; ++i) {
-		struct wormhole_layer *used = ctx->layers.data[i];
+	for (i = 0; i < ctx->layer_names.count; ++i) {
+		const char *name = ctx->layer_names.data[i];
 
-		if (used->depth == 0)
-			strutil_array_append(&layer->used, used->name);
+		strutil_array_append(&layer->used, name);
 	}
 
 	if (ctx->manage_rpmdb) {
