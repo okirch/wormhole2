@@ -572,8 +572,8 @@ update_image(struct imgdelta_config *cfg)
 			return 1;
 	}
 
-        if (!fsutil_make_fs_private("/", false))
-                return 1;
+	if (!fsutil_make_fs_private("/", cfg->running_inside_chroot))
+		return 1;
 
 	if (!fsutil_tempdir_mount(&tempdir))
 		return 1;
@@ -891,6 +891,11 @@ main(int argc, char **argv)
 	/* should check for CAP_CHOWN */
 	if (geteuid() == 0)
 		can_chown = true;
+
+	if (!fsutil_dir_is_mountpoint("/")) {
+		log_warning("Running inside what looks like a chroot environment.");
+		config.running_inside_chroot = true;
+	}
 
 	/* Traverse the entire filesystem and modify the image accordingly. */
 	rv = update_image(&config);

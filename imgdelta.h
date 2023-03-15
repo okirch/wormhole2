@@ -28,6 +28,7 @@ struct imgdelta_config {
 	unsigned int		debug;
 	bool			force;
 	bool			create_base_layer;
+	bool			running_inside_chroot;
 	unsigned int		ignore_change_mask;
 
 	struct wormhole_layer *	layer;
