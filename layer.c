@@ -328,7 +328,7 @@ wormhole_layers_resolve(struct wormhole_layer_array *layers, const struct struti
 {
 	unsigned int i;
 
-	trace("%s()", __func__);
+	trace2("%s()", __func__);
 	for (i = 0; i < names->count; ++i) {
 		const char *name = names->data[i];
 

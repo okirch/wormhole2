@@ -191,10 +191,6 @@ mount_farm_discover(struct mount_farm *farm, struct wormhole_layer_array *layers
 	 && mount_farm_apply_quirks(farm)
 	 && mount_farm_percolate(farm)
 	 && mount_farm_fill_holes(farm)) {
-		trace("Final tree:");
-		mount_farm_print_tree(farm);
-		trace("---");
-
 		okay = true;
 	}
 
@@ -410,7 +406,7 @@ wormhole_context_mount_tree(struct wormhole_context *ctx)
 {
 	struct mount_farm *farm = ctx->farm;
 
-	if (tracing_level > 0) {
+	if (tracing_level > 2) {
 		trace("Tree to be assembled:\n");
 		mount_farm_print_tree(farm);
 		trace("---\n");
