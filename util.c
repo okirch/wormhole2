@@ -611,7 +611,7 @@ fsutil_tempdir_unmount(struct fsutil_tempdir *td)
 	if (td->mounted && umount2(td->path, MNT_DETACH) < 0) {
                 log_error("Unable to unmount %s: %m", td->path);
 		return false;
-        }
+	}
 	td->mounted = false;
 	return true;
 }
@@ -758,7 +758,7 @@ fsutil_makedir2(const char *parent, const char *name)
         if (!fsutil_makedirs(path, 0755)) {
                 log_error("Unable to create %s: %m\n", path);
                 return NULL;
-        }
+	}
 
         return path;
 }
@@ -771,7 +771,7 @@ fsutil_makefile2(const char *parent, const char *name)
         if (!fsutil_makefile(path, 0644)) {
                 log_error("Unable to create file %s: %m\n", path);
                 return NULL;
-        }
+	}
 
         return path;
 }
@@ -818,7 +818,7 @@ __fsutil_get_dtype(const struct stat *st)
                 return DT_FIFO;
         default:
                 break;
-        }
+	}
         return DT_UNKNOWN;
 }
 
