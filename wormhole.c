@@ -460,9 +460,6 @@ prepare_tree_for_use(struct wormhole_context *ctx)
 {
 	struct mount_farm *farm = ctx->farm;
 
-	trace("%s()", __func__);
-	ctx->farm->tree->root->export_type = WORMHOLE_EXPORT_ROOT;
-
 	if (!wormhole_context_resolve_layers(ctx))
 		return false;
 

@@ -53,6 +53,7 @@ mount_farm_new(const char *farm_root)
 	pathutil_concat2(&farm->chroot, farm_root, "root");
 
 	farm->tree = fstree_new(farm->chroot);
+	farm->tree->root->export_type = WORMHOLE_EXPORT_ROOT;
 
 	return farm;
 }
