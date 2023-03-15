@@ -1421,6 +1421,11 @@ __fsutil_ftw_do_callback(struct fsutil_ftw_ctx *ctx, const struct dirent *d, int
 {
 	struct fsutil_ftw_level *dir = ctx->current;
 
+	if (d == NULL) {
+		log_error("%s called with NULL dirent");
+		return FTW_ERROR;
+	}
+
 	return ctx->user_callback(dir->path, d, ctx->flags | extra_flags, ctx->user_closure);
 }
 
@@ -1440,9 +1445,10 @@ fsutil_ftw(const char *dir_path, fsutil_ftw_cb_fn_t *callback, void *closure, in
 
 	while (rv == FTW_CONTINUE) {
 		if ((d = __fsutil_ftw_next(ctx->current)) == NULL) {
-			if (ctx->callback_after) {
+			if (ctx->callback_after && ctx->current && ctx->current->saved_dirent) {
 				d = ctx->current->saved_dirent;
-				rv = __fsutil_ftw_do_callback(ctx, ctx->current->saved_dirent, FSUTIL_FTW_POST_DESCENT);
+				ctx->current->saved_dirent = NULL;
+				rv = __fsutil_ftw_do_callback(ctx, d, FSUTIL_FTW_POST_DESCENT);
 			} else {
 				rv = FTW_CONTINUE;
 			}
