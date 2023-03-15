@@ -69,6 +69,7 @@ extern void			fsutil_tempdir_init(struct fsutil_tempdir *td);
 extern char *			fsutil_tempdir_path(struct fsutil_tempdir *td);
 extern bool			fsutil_tempdir_mount(struct fsutil_tempdir *td);
 extern bool			fsutil_tempdir_unmount(struct fsutil_tempdir *td);
+extern bool			__fsutil_tempdir_unmount(struct fsutil_tempdir *td);
 extern int			fsutil_tempdir_cleanup(struct fsutil_tempdir *td);
 extern int			fsutil_tempfile(const char *basename, char *path, size_t size);
 

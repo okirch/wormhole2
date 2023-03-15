@@ -569,6 +569,17 @@ fsutil_tempdir_mount(struct fsutil_tempdir *td)
 }
 
 bool
+__fsutil_tempdir_unmount(struct fsutil_tempdir *td)
+{
+	if (umount2(td->path, MNT_DETACH) < 0) {
+                log_error("Unable to unmount %s: %m", td->path);
+		return false;
+	}
+	td->mounted = false;
+	return true;
+}
+
+bool
 fsutil_tempdir_unmount(struct fsutil_tempdir *td)
 {
 	if (td->mounted && umount2(td->path, MNT_DETACH) < 0) {

@@ -578,6 +578,11 @@ wormhole_context_perform_in_container(struct wormhole_context *ctx, int (*fn)(st
 		return false;
 	}
 
+	/* In case we're running in a chroot environment (such as a local osc build)
+	 * try to play nice and clean up the stuff we mounted. */
+	trace("Trying to unmount the mount staging dir");
+	__fsutil_tempdir_unmount(&ctx->temp);
+
 	trace("Container sub-process exited with status %d", ctx->exit_status);
 	return true;
 }
