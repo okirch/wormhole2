@@ -37,16 +37,6 @@
 #include "tracing.h"
 #include "util.h"
 
-static char *
-concat_path(const char *parent, const char *name)
-{
-	const char *path = __pathutil_concat2(parent, name);
-
-	if (path)
-		return strdup(path);
-	return NULL;
-}
-
 static bool
 __mount_farm_discover_callback(void *closure, const char *mount_point,
                                 const char *mnt_type,
@@ -710,6 +700,7 @@ __perform_build(struct wormhole_context *ctx)
 		goto out;
 
 	if (ctx->manage_rpmdb && ctx->layers.count) {
+		const char *root_path = ctx->farm->chroot;
 		const char *rpmdb_orig = RPMDB_PATH;
 		unsigned int i;
 
@@ -717,107 +708,22 @@ __perform_build(struct wormhole_context *ctx)
 		for (i = 0; i < ctx->layers.count; ++i) {
 			struct wormhole_layer *layer = ctx->layers.data[i];
 
-			trace("layer %s root %s isdir %u",
-					layer->name, layer->path,
-					fsutil_isdir(layer->path));
-			{
-				char x[1024];
-				sprintf(x, "find %s -ls", layer->rpmdb_path);
-				system(x);
-			}
-			if (!wormhole_layer_patch_rpmdb(ctx->layers.data[i], rpmdb_orig, ctx->farm->chroot))
+			if (!wormhole_layer_patch_rpmdb(layer, rpmdb_orig, root_path))
 				goto out;
-		}
-
-		{
-			char x[1024];
-
-			sprintf(x, "rpm --root %s -V libsqlite3-0", ctx->farm->chroot);
-			trace("about to call %s", x);
-			system(x);
-			sprintf(x, "rpm --root %s -qi python310-base", ctx->farm->chroot);
-			trace("about to call %s", x);
-			system(x);
 		}
 	}
 
 	if (!wormhole_context_switch_root(ctx))
 		goto out;
 
-	return run_the_command(ctx);
+	if (run_the_command(ctx) != 0)
+		goto out;
+
+	trace("Now perform the pruning");
+	ctx->exit_status = __prune_build2(ctx);
 
 out:
 	return ctx->exit_status;
-}
-
-struct prune_ctx {
-	char *			image_root;
-	struct mount_farm *	mounts;
-};
-
-static int
-__prune_callback(const char *dir_path, const struct dirent *d, int flags, void *closure)
-{
-	struct prune_ctx *prune = closure;
-	const char *relative_path;
-	char *full_path = NULL;
-	struct fstree_node *mount;
-
-	if (d->d_type != DT_DIR)
-		return FTW_CONTINUE;
-
-	pathutil_concat2(&full_path, dir_path, d->d_name);
-
-	if (!(relative_path = fsutil_strip_path_prefix(full_path, prune->image_root)))
-		return FTW_ERROR;
-
-	mount = mount_farm_find_leaf(prune->mounts, relative_path);
-	if (mount) {
-		bool try_to_prune = false;
-
-		if (fstree_node_is_mountpoint(mount)
-		 || !fstree_node_is_below_mountpoint(mount))
-			try_to_prune = true;
-
-		if (try_to_prune && rmdir(full_path) == 0)
-			trace("Pruned %s", full_path);
-	}
-
-	strutil_drop(&full_path);
-	return FTW_CONTINUE;
-}
-
-
-static int
-__prune_build(struct wormhole_context *ctx)
-{
-	unsigned int saved_tracing_level = tracing_level;
-	struct prune_ctx prune_ctx;
-
-	tracing_set_level(0);
-	if (!wormhole_context_detach(ctx))
-		goto out;
-
-	if (!prepare_tree_for_building(ctx))
-		goto out;
-
-	tracing_set_level(saved_tracing_level);
-
-	/* FIXME: remove files:
-	 *   - /usr/lib/sysimage/rpm
-	 *   - /etc/ld.so.conf
-	 *   - /var/cache/ldconfig
-	 */
-
-	prune_ctx.image_root = concat_path(ctx->build_root, "image");
-	prune_ctx.mounts = ctx->farm;
-
-	fsutil_ftw(prune_ctx.image_root, __prune_callback, &prune_ctx, FSUTIL_FTW_ONE_FILESYSTEM | FSUTIL_FTW_DEPTH_FIRST);
-
-	return 0;
-
-out:
-	return 42;
 }
 
 static void
@@ -837,8 +743,6 @@ do_build(struct wormhole_context *ctx)
 
 	/* Now post-process the build. */
 	trace("Post-process build result");
-	if (!wormhole_context_perform_in_container(ctx, __prune_build, false))
-		return;
 
 	layer = wormhole_layer_new(ctx->build_target, ctx->build_root, 0);
 	for (i = 0; i < ctx->layers.count; ++i) {
