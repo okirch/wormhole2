@@ -360,6 +360,9 @@ wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct
 {
 	const struct fstree_node *child;
 
+	if (tree->export_type == WORMHOLE_EXPORT_ROOT) {
+		/* nothing to be done */
+	} else
 	if (tree->export_type == WORMHOLE_EXPORT_STACKED) {
 		strutil_array_append(&layer->stacked_directories, tree->relative_path);
 	} else
