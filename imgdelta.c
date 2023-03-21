@@ -189,7 +189,23 @@ __image_copy(const char *image_root, const char *src_path, const char *relative_
 
 	image_path = __pathutil_concat2(image_root, relative_src_path);
 	if (dt_type == DT_DIR) {
+		mode_t mode = st->st_mode;
+
 		trace2("create dir %s", image_path);
+
+		/* This may not the the right place. Maybe we should do this as a post-processing step.
+		 * The only case where we really need to change a directory's permission is if we want
+		 * to mount something on top of it. OTOH, how do we really know which directories will
+		 * end up being used as mount points? */
+		if ((mode ^ 0055) & 0055) {
+			log_info("%s: directory has mode 0%o, changing to 0%o", src_path, mode, mode | 0055);
+			if (st != &_stb) {
+				_stb = *st;
+				st = &_stb;
+			}
+			_stb.st_mode |= 055;
+		}
+
 		if (!fsutil_makedirs(image_path, st->st_mode)) {
 			log_error("%s: cannot create directory: %m", image_path);
 			return false;
