@@ -559,7 +559,11 @@ static int
 update_image(struct imgdelta_config *cfg)
 {
 	struct fsutil_tempdir tempdir;
+	mode_t old_umask;
 	int rv;
+
+	/* Set the umask to 0 for all files and dirs we create. */
+	old_umask = umask(0);
 
 	fsutil_tempdir_init(&tempdir);
 
@@ -581,6 +585,7 @@ update_image(struct imgdelta_config *cfg)
 	rv = update_image_work(cfg, fsutil_tempdir_path(&tempdir));
 
 	fsutil_tempdir_cleanup(&tempdir);
+	umask(old_umask);
 	return rv;
 }
 
