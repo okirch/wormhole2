@@ -120,6 +120,7 @@ struct wormhole_context {
 	struct mount_farm *	farm;
 
 	bool			manage_rpmdb;
+	bool			map_caller_to_root;
 	bool			use_privileged_namespace;
 	bool			running_inside_chroot;
 
