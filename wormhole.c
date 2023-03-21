@@ -420,9 +420,13 @@ wormhole_context_set_boot(struct wormhole_context *ctx, const char *name)
 }
 
 static bool
-wormhole_context_resolve_layers(struct wormhole_context *ctx)
+wormhole_context_resolve_layers(struct wormhole_context *ctx, bool remount_layers)
 {
-	return wormhole_layers_resolve(&ctx->layers, &ctx->layer_names, ctx->image_path);
+	const char *remount_image_base = NULL;
+
+	if (remount_layers)
+		remount_image_base = ctx->image_path;
+	return wormhole_layers_resolve(&ctx->layers, &ctx->layer_names, remount_image_base);
 }
 
 void
@@ -477,7 +481,7 @@ wormhole_context_mount_tree(struct wormhole_context *ctx)
 }
 
 static bool
-prepare_tree_for_building(struct wormhole_context *ctx)
+prepare_tree_for_building(struct wormhole_context *ctx, bool remount_layers)
 {
 	struct mount_farm *farm = ctx->farm;
 
@@ -487,7 +491,7 @@ prepare_tree_for_building(struct wormhole_context *ctx)
 	if (!mount_farm_set_upper_base(farm, ctx->build_root))
 		return false;
 
-	if (!wormhole_context_resolve_layers(ctx))
+	if (!wormhole_context_resolve_layers(ctx, remount_layers))
 		return false;
 
 	trace("About to call mount_farm_assemble_for_build");
@@ -502,7 +506,7 @@ prepare_tree_for_use(struct wormhole_context *ctx)
 {
 	struct mount_farm *farm = ctx->farm;
 
-	if (!wormhole_context_resolve_layers(ctx))
+	if (!wormhole_context_resolve_layers(ctx, true))
 		return false;
 
 	if (!mount_farm_assemble_for_run(farm, &ctx->layers))
@@ -789,7 +793,7 @@ __perform_build(struct wormhole_context *ctx)
 	if (!wormhole_context_detach(ctx))
 		goto out;
 
-	if (!prepare_tree_for_building(ctx)
+	if (!prepare_tree_for_building(ctx, true)
 	 || !wormhole_context_mount_tree(ctx))
 		goto out;
 
@@ -832,7 +836,7 @@ record_modified_mounts_to_layer(struct wormhole_context *ctx, struct wormhole_la
 	if (!mount_farm_set_upper_base(farm, ctx->build_root))
 		return false;
 
-	if (!wormhole_context_resolve_layers(ctx))
+	if (!wormhole_context_resolve_layers(ctx, true))
 		return false;
 
 	trace("Applying layers");
