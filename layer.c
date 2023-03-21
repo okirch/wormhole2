@@ -23,6 +23,7 @@
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
+#include <wordexp.h>
 
 #include "wormhole2.h"
 #include "paths.h"
@@ -423,4 +424,32 @@ wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm 
 	}
 
 	return true;
+}
+
+/*
+ * Given a layer name, build the path name to the user-private layer directory
+ */
+char *
+wormhole_layer_make_user_path(const char *name)
+{
+	char pathbuf[PATH_MAX];
+	wordexp_t words;
+	char *result = NULL;
+
+	snprintf(pathbuf, sizeof(pathbuf), "%s/%s", WORMHOLE_USER_LAYER_BASE_PATH, name);
+
+	memset(&words, 0, sizeof(words));
+	if (wordexp(pathbuf, &words, WRDE_NOCMD) != 0) {
+		log_error("Cannot expand path \"%s\": %m", pathbuf);
+		return NULL;
+	}
+
+	if (words.we_wordc != 1) {
+		log_error("Path expansion of \"%s\" produced %u results", pathbuf, words.we_wordc);
+	} else {
+		result = strdup(words.we_wordv[0]);
+	}
+
+	wordfree(&words);
+	return result;
 }
