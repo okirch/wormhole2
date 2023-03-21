@@ -869,10 +869,12 @@ do_build(struct wormhole_context *ctx)
 	struct wormhole_layer *layer;
 	unsigned int i;
 
+#if 0
 	if (!ctx->use_privileged_namespace) {
 		log_error("Currently, you must be root to build wormhole layers\n");
 		return;
 	}
+#endif
 
 	trace("Performing build stage");
 	if (!wormhole_context_perform_in_container(ctx, __perform_build, false))
