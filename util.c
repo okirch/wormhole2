@@ -708,8 +708,16 @@ fsutil_make_thing(const char *path, int mode, int (*createfn)(const char *path, 
 {
 	char path_copy[PATH_MAX];
 
-	if (createfn(path, mode) == 0 || errno == EEXIST)
+	if (createfn(path, mode) == 0)
 		return true;
+
+	if (errno == EEXIST) {
+		if (chmod(path, mode) < 0) {
+			log_error("cannot change mode on %s: %m", path);
+			return false;
+		}
+		return true;
+	}
 
 	if (errno != ENOENT)
 		return false;
