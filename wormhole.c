@@ -328,6 +328,7 @@ wormhole_context_free(struct wormhole_context *ctx)
 	strutil_drop(&ctx->workspace);
 	strutil_drop(&ctx->build_target);
 	strutil_drop(&ctx->build_root);
+	strutil_drop(&ctx->build_bindir);
 
 	if (ctx->farm) {
 		mount_farm_free(ctx->farm);
@@ -1069,6 +1070,7 @@ enum {
 	OPT_RUNAS_USER,
 	OPT_AUTO_ENTRY_POINTS,
 	OPT_NO_AUTO_ENTRY_POINTS,
+	OPT_INSTALL_BINDIR,
 	OPT_RPMDB,
 };
 
@@ -1090,6 +1092,8 @@ static struct option	long_options[] = {
 			no_argument,		NULL,	OPT_AUTO_ENTRY_POINTS },
 	{ "no-auto-entry-points",
 			no_argument,		NULL,	OPT_NO_AUTO_ENTRY_POINTS },
+	{ "install-bindir",
+			required_argument,	NULL,	OPT_INSTALL_BINDIR },
 
 	{ NULL },
 };
@@ -1149,6 +1153,10 @@ main(int argc, char **argv)
 
 		case OPT_NO_AUTO_ENTRY_POINTS:
 			ctx->auto_entry_points = false;
+			break;
+
+		case OPT_INSTALL_BINDIR:
+			strutil_set(&ctx->build_bindir, optarg);
 			break;
 
 		default:
