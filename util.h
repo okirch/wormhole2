@@ -152,6 +152,25 @@ extern const char *		fsutil_makedir2(const char *parent, const char *name);
 extern const char *		fsutil_makefile2(const char *parent, const char *name);
 extern bool			fsutil_copy_file(const char *system_path, const char *image_path, const struct stat *st);
 
+typedef struct fsutil_mount_iterator fsutil_mount_iterator_t;
+
+typedef struct fsutil_mount_cursor {
+	const char *		mountpoint;
+	const char *		fstype;
+	const char *		fsname;
+	const char *		options;
+
+	union {
+		struct {
+			const struct strutil_array *dirs;
+		} overlay;
+	};
+} fsutil_mount_cursor_t;
+
+extern fsutil_mount_iterator_t *fsutil_mount_iterator_create(const char *root_path, const char *mtab);
+extern bool			fsutil_mount_iterator_next(fsutil_mount_iterator_t *, fsutil_mount_cursor_t *);
+extern void			fsutil_mount_iterator_free(fsutil_mount_iterator_t *);
+
 static inline const char *
 __pathutil_concat2(const char *parent, const char *name)
 {
