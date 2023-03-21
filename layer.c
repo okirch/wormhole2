@@ -39,10 +39,21 @@ wormhole_layer_new(const char *name, const char *path, unsigned int depth)
 	layer->refcount = 1;
 	layer->name = strdup(name);
 	layer->depth = depth;
-	if (path)
+
+	if (path) {
 		strutil_set(&layer->path, path);
-	else
-		pathutil_concat2(&layer->path, WORMHOLE_LAYER_BASE_PATH, name);
+	} else {
+		char *user_path = wormhole_layer_make_user_path(name);
+
+		/* FIXME: more consistency checks? */
+		if (user_path && fsutil_isdir(user_path))
+			strutil_set(&layer->path, user_path);
+		else
+			pathutil_concat2(&layer->path, WORMHOLE_LAYER_BASE_PATH, name);
+
+		strutil_drop(&user_path);
+	}
+
 	pathutil_concat2(&layer->config_path, layer->path, "layer.conf");
 	pathutil_concat2(&layer->image_path, layer->path, "image");
 	pathutil_concat2(&layer->wrapper_path, layer->path, "bin");
