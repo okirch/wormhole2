@@ -37,37 +37,92 @@
 #include "tracing.h"
 #include "util.h"
 
+#define BIND_SYSTEM_OVERLAYS	true
+
 static bool
-__mount_farm_discover_callback(void *closure, const char *mount_point,
-                                const char *mnt_type,
-                                const char *fsname)
+system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *cursor)
 {
-	struct fstree *fstree = closure;
 	struct fstree_node *node;
 
-	if (!strcmp(mount_point, "/"))
+	if (!strcmp(cursor->mountpoint, "/"))
 		return true;
 
-	if (!strncmp(mount_point, "/tmp/", 5)) {
-		trace3("Ignoring mount point %s\n", mount_point);
-		return true;
+	if (cursor->fstype == NULL) {
+		trace("system mount %s has null fstype", cursor->mountpoint);
+		return false;
 	}
 
-	node = fstree_add_export(fstree, mount_point, WORMHOLE_EXPORT_TRANSPARENT, NULL);
+	if (strcmp(cursor->fstype, "overlay") || BIND_SYSTEM_OVERLAYS) {
+		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_STACKED, NULL);
+	} else {
+		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_TRANSPARENT, NULL);
+		if (node && cursor->overlay.dirs->count) {
+			struct wormhole_layer *l;
+
+			if (cursor->overlay.dirs->count == 0) {
+				log_error("system mount %s is an overlay, but we didn't detect any layers",
+						cursor->mountpoint);
+				return false;
+			}
+
+			l = wormhole_layer_new("system-layer", NULL, 0);
+			strutil_array_append_array(&l->stacked_directories, cursor->overlay.dirs);
+			wormhole_layer_array_append(&node->attached_layers, l);
+		}
+	}
+
 	if (node == NULL) {
-		log_error("mount_farm_add_transparent(%s) failed\n", mount_point);
+		log_error("failed to add node for system mount %s\n", cursor->mountpoint);
 		return false;
 	}
 
 	if (node->fstype) {
-		log_error("%s: duplicate mount (%s -> %s)", mount_point, node->fstype, mnt_type);
+		log_error("%s: duplicate mount (%s -> %s)", cursor->mountpoint, node->fstype, cursor->fstype);
 		return false;
 	}
 	assert(node->fstype == NULL);
 	assert(node->fsname == NULL);
-	node->fstype = strdup(mnt_type);
-	node->fsname = strdup(fsname);
+	node->fstype = strdup(cursor->fstype);
+	node->fsname = strdup(cursor->fsname);
 	return true;
+}
+
+static struct fstree *
+system_mount_tree_discover(void)
+{
+	struct strutil_array dropped = { 0, };
+	fsutil_mount_iterator_t *it;
+	fsutil_mount_cursor_t cursor;
+	struct fstree *fstree;
+
+	if (!(it = fsutil_mount_iterator_create(NULL, NULL)))
+		return NULL;
+
+	fstree = fstree_new(NULL);
+
+	while (fsutil_mount_iterator_next(it, &cursor))
+		system_mount_tree_maybe_add(fstree, &cursor);
+
+	fsutil_mount_iterator_free(it);
+
+	fstree->root->export_type = WORMHOLE_EXPORT_ROOT;
+
+	fstree_drop_pattern(fstree, "/tmp/*", &dropped);
+	fstree_drop_pattern(fstree, "/usr", &dropped);
+	fstree_drop_pattern(fstree, "/lib", &dropped);
+	fstree_drop_pattern(fstree, "/lib64", &dropped);
+	fstree_drop_pattern(fstree, "/bin", &dropped);
+	fstree_drop_pattern(fstree, "/sbin", &dropped);
+
+	if (dropped.count) {
+		unsigned int i;
+
+		log_info("Ignoring the following system mount(s):");
+		for (i = 0; i < dropped.count; ++i)
+			log_info("  %s", dropped.data[i]);
+	}
+
+	return fstree;
 }
 
 static bool
@@ -86,8 +141,7 @@ mount_farm_discover_system_mounts(struct mount_farm *farm)
 
 	trace("Discovering system mounts");
 
-	fstree = fstree_new(NULL);
-	if (!fstree_discover(NULL, __mount_farm_discover_callback, fstree)) {
+	if (!(fstree = system_mount_tree_discover())) {
 		log_error("Mount state discovery failed\n");
 		return false;
 	}
@@ -96,19 +150,9 @@ mount_farm_discover_system_mounts(struct mount_farm *farm)
 	while ((node = fstree_iterator_next(it)) != NULL) {
 		struct fstree_node *new_mount;
 
-		trace("  %s", node->relative_path);
-
 		/* Just an internal tree node, not a mount */
-		if (node->export_type == WORMHOLE_EXPORT_NONE)
+		if (node->export_type != WORMHOLE_EXPORT_TRANSPARENT)
 			continue;
-
-		if (!strncmp(node->relative_path, "/usr", 4)
-		 || !strncmp(node->relative_path, "/bin", 4)
-		 || !strncmp(node->relative_path, "/lib", 4)
-		 || !strncmp(node->relative_path, "/lib64", 6)) {
-			log_warning("Ignoring mount point %s", node->relative_path);
-			continue;
-		}
 
 		new_mount = mount_farm_add_transparent(farm, node->relative_path, NULL);
 		if (new_mount == NULL)
