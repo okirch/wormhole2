@@ -275,6 +275,7 @@ wormhole_layer_remount_image(struct wormhole_layer *layer, const char *image_bas
 		return false;
 	}
 
+	trace("Remounting %s as %s", layer->image_path, layer_bind_path);
 	if (!fsutil_mount_bind(layer->image_path, layer_bind_path, false))
 		return false;
 

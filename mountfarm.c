@@ -326,7 +326,7 @@ fstree_add_export(struct fstree *fstree, const char *system_path, unsigned int e
 		node->export_type = export_type;
 	} else
 	if (node->export_type != export_type) {
-		log_error("%s: conflicting export types (%s vs %s", system_path,
+		log_error("%s: conflicting export types (%s vs %s)", system_path,
 				mount_export_type_as_string(node->export_type),
 				mount_export_type_as_string(export_type));
 		return NULL;
