@@ -30,6 +30,7 @@ struct imgdelta_config {
 	bool			create_base_layer;
 	bool			running_inside_chroot;
 	unsigned int		ignore_change_mask;
+	char *			install_bindir;
 
 	struct wormhole_layer *	layer;
 
@@ -42,6 +43,7 @@ struct imgdelta_config {
 	struct strutil_array	transparent_mounts;
 
 	struct strutil_array	entry_points;
+	strutil_mapping_t	entry_point_symlinks;
 };
 
 #endif /* IMGDELTA_H */

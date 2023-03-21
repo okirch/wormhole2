@@ -1002,8 +1002,12 @@ do_build(struct wormhole_context *ctx)
 		return;
 	}
 
-	if (ctx->auto_entry_points)
+	if (ctx->auto_entry_points) {
 		discover_entry_points(layer);
+
+		if (ctx->build_target_type == BUILD_USER_LAYER)
+			wormhole_layer_create_default_wrapper_symlinks(layer);
+	}
 
 	if (!wormhole_layer_write_wrappers(layer, ctx->build_bindir)) {
 		log_error("Unable to create wrapper scripts for new layer");

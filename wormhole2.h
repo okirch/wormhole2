@@ -87,6 +87,7 @@ struct wormhole_layer {
 	struct strutil_array	stacked_directories;
 	struct strutil_array	transparent_directories;
 	struct strutil_array	entry_points;
+	struct strutil_mapping	entry_point_symlinks;
 
 	/* if 0, referenced by command line */
 	unsigned int		depth;
@@ -199,12 +200,14 @@ extern void			wormhole_layer_release(struct wormhole_layer *layer);
 extern bool			wormhole_layer_load_config(struct wormhole_layer *layer);
 extern bool			wormhole_layer_save_config(struct wormhole_layer *layer);
 extern bool			wormhole_layer_remount_image(struct wormhole_layer *layer, const char *image_base);
+extern bool			wormhole_layer_create_default_wrapper_symlinks(struct wormhole_layer *layer);
 extern bool			wormhole_layer_write_wrappers(struct wormhole_layer *layer, const char *install_bindir);
 extern void			wormhole_layer_array_append(struct wormhole_layer_array *a, struct wormhole_layer *layer);
 extern void			wormhole_layer_array_append_unique(struct wormhole_layer_array *a, struct wormhole_layer *layer);
 extern struct wormhole_layer *	wormhole_layer_array_find(struct wormhole_layer_array *a, const char *name);
 extern void			wormhole_layer_array_destroy(struct wormhole_layer_array *a);
 extern char *			wormhole_layer_make_path(const char *name, int target_type);
+extern void			wormhole_layer_add_entry_point_symlink(struct wormhole_layer *layer, const char *entry_point_name, const char *symlink_path);
 
 extern bool			wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct fstree_node *tree);
 extern bool			wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm *farm);

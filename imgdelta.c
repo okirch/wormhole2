@@ -640,6 +640,7 @@ static bool
 __update_layer_config(struct wormhole_layer *layer, struct imgdelta_config *cfg)
 {
 	struct mount_farm *farm;
+	unsigned int i;
 
 	layer->is_root = cfg->create_base_layer;
 	if (!cfg->create_base_layer)
@@ -654,6 +655,12 @@ __update_layer_config(struct wormhole_layer *layer, struct imgdelta_config *cfg)
 	wormhole_layer_update_from_mount_farm(layer, farm->tree->root);
 	mount_farm_free(farm);
 
+	for (i = 0; i < cfg->entry_point_symlinks.count; ++i) {
+		struct strutil_mapping_pair *link = &cfg->entry_point_symlinks.data[i];
+
+		wormhole_layer_add_entry_point_symlink(layer, link->key, link->value);
+	}
+
 	return true;
 }
 
@@ -667,12 +674,17 @@ write_layer_config(struct imgdelta_config *cfg)
 	return 0;
 }
 
+enum {
+	OPT_BINDIR = 256,
+};
+
 static struct option	long_options[] = {
 	{ "create-base-layer",	no_argument,		NULL,	'B'		},
 	{ "config",		required_argument,	NULL,	'c'		},
 	{ "copy",		required_argument,	NULL,	'C'		},
 	{ "exclude",		required_argument,	NULL,	'X'		},
 	{ "use-layer",		required_argument,	NULL,	'L'		},
+	{ "bindir",		required_argument,	NULL,	OPT_BINDIR	},
 	{ "force",		no_argument,		NULL,	'f'		},
 	{ "debug",		no_argument,		NULL,	'd'		},
 	{ "ignore-change",	required_argument,	NULL,	'I'		},
@@ -704,6 +716,11 @@ config_set_ignore_changes(struct imgdelta_config *cfg, const char *ignore_string
 	return true;
 }
 
+static void
+config_add_entry_symlink(struct imgdelta_config *cfg, const char *entry_point_name, const char *symlink_path)
+{
+	strutil_mapping_add(&cfg->entry_point_symlinks, entry_point_name, symlink_path);
+}
 
 static bool
 read_config(struct imgdelta_config *cfg, const char *filename)
@@ -764,6 +781,18 @@ read_config(struct imgdelta_config *cfg, const char *filename)
 			}
 
 			strutil_array_append(&cfg->entry_points, value);
+		} else
+		if (!strcmp(kwd, "install-symlink")) {
+			char *entry_point_name, *link_path = NULL;
+			char *equals;
+
+			entry_point_name = value;
+			if ((equals = strstr(value, "=")) != NULL) {
+				*equals++ = '\0';
+				link_path = equals;
+			}
+
+			config_add_entry_symlink(cfg, entry_point_name, link_path);
 		} else
 		if (!strcmp(kwd, "ignore-change")) {
 			if (!config_set_ignore_changes(cfg, value))
@@ -828,6 +857,10 @@ main(int argc, char **argv)
 
 		case 'f':
 			config.force = true;
+			break;
+
+		case OPT_BINDIR:
+			config.install_bindir = optarg;
 			break;
 
 		default:
@@ -921,7 +954,7 @@ main(int argc, char **argv)
 		 * config file.
 		 * For the time being, do not create symlinks in /usr/bin yet
 		 */
-		if (!wormhole_layer_write_wrappers(config.layer, NULL))
+		if (!wormhole_layer_write_wrappers(config.layer, config.install_bindir))
 			rv = 1;
 	}
 

@@ -72,6 +72,10 @@ wormhole_layer_free(struct wormhole_layer *layer)
 	strutil_set(&layer->image_path, NULL);
 	strutil_set(&layer->wrapper_path, NULL);
 	strutil_set(&layer->rpmdb_path, NULL);
+	strutil_array_destroy(&layer->stacked_directories);
+	strutil_array_destroy(&layer->transparent_directories);
+	strutil_array_destroy(&layer->entry_points);
+	strutil_mapping_destroy(&layer->entry_point_symlinks);
 
 	free(layer);
 }
@@ -247,7 +251,7 @@ wormhole_layer_save_config(struct wormhole_layer *layer)
 static bool
 wormhole_layer_write_wrapper(struct wormhole_layer *layer, const char *app_path, const char *install_bindir)
 {
-	char *wrapper_path = NULL, *symlink_path = NULL;
+	char *wrapper_path = NULL;
 	bool ok = false;
 	FILE *fp;
 
@@ -272,24 +276,26 @@ wormhole_layer_write_wrapper(struct wormhole_layer *layer, const char *app_path,
 		goto out;
 	}
 
-	if (install_bindir) {
-		pathutil_concat2(&symlink_path, install_bindir, basename(app_path));
-
-		trace("  install symlink %s -> %s", symlink_path, wrapper_path);
-		(void) unlink(symlink_path);
-		if (symlink(wrapper_path, symlink_path) < 0) {
-			log_error("Cannot create symlink %s -> %s: %m",
-					symlink_path, wrapper_path);
-			goto out;
-		}
-	}
-
 	ok = true;
 
 out:
 	strutil_drop(&wrapper_path);
-	strutil_drop(&symlink_path);
 	return ok;
+}
+
+bool
+wormhole_layer_create_default_wrapper_symlinks(struct wormhole_layer *layer)
+{
+	unsigned int i;
+
+	for (i = 0; i < layer->entry_points.count; ++i) {
+		const char *name = basename(layer->entry_points.data[i]);
+
+		trace("add EP symlink %s", name);
+		strutil_mapping_add_no_override(&layer->entry_point_symlinks, name, name);
+	}
+	trace("fone");
+	return true;
 }
 
 bool
@@ -306,7 +312,38 @@ wormhole_layer_write_wrappers(struct wormhole_layer *layer, const char *install_
 			ok = false;
 	}
 
+	if (install_bindir) {
+		char *symlink_path = NULL, *wrapper_path = NULL;
+
+		for (i = 0; i < layer->entry_point_symlinks.count; ++i) {
+			struct strutil_mapping_pair *entry = &layer->entry_point_symlinks.data[i];
+
+			pathutil_concat2(&wrapper_path, layer->wrapper_path, entry->key);
+
+			if (entry->value == NULL)
+				continue;
+
+			if (entry->value[0] == '/')
+				strutil_set(&symlink_path, entry->value);
+			else
+				pathutil_concat2(&symlink_path, install_bindir, entry->value);
+
+			trace("  install symlink %s -> %s", symlink_path, wrapper_path);
+			(void) unlink(symlink_path);
+			if (symlink(wrapper_path, symlink_path) < 0) {
+				log_error("Cannot create symlink %s -> %s: %m", symlink_path, wrapper_path);
+				ok = false;
+			}
+		}
+	}
+
 	return ok;
+}
+
+void
+wormhole_layer_add_entry_point_symlink(struct wormhole_layer *layer, const char *entry_point_name, const char *symlink_path)
+{
+	strutil_mapping_add(&layer->entry_point_symlinks, entry_point_name, symlink_path);
 }
 
 /*
