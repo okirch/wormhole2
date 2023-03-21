@@ -409,9 +409,18 @@ wormhole_context_set_build(struct wormhole_context *ctx, const char *name)
 
 	/* Set the default build root */
 	if (ctx->build_root == NULL) {
-		strutil_set(&ctx->build_root, fsutil_makedir2(get_current_dir_name(), "wormhole-build"));
+		ctx->build_root = wormhole_layer_make_user_path(ctx->build_target);
 		if (ctx->build_root == NULL)
-			log_fatal("Cannot set build root to $PWD/wormhole-build");
+			log_fatal("Unable to determine layer path for build target %s", ctx->build_target);
+	}
+
+	if (fsutil_exists(ctx->build_root)) {
+		if (!ctx->force)
+			log_fatal("%s already exists, timidly refusing to proceed", ctx->build_root);
+
+		if (!fsutil_remove_recursively(ctx->build_root))
+			log_fatal("failed to remove previous build of %s (located in %s)",
+					ctx->build_target, ctx->build_root);
 	}
 }
 

@@ -126,6 +126,7 @@ struct wormhole_context {
 	bool			use_privileged_namespace;
 	bool			running_inside_chroot;
 	bool			auto_entry_points;
+	bool			force;
 
 	struct fsutil_tempdir	temp;
 };
