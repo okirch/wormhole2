@@ -410,14 +410,14 @@ fstree_node_mount(const struct fstree_node *node)
 
 	if (!node->readonly)
 		snprintf(options, sizeof(options),
-			"lowerdir=%s,upperdir=%s,workdir=%s",
+			"userxattr,lowerdir=%s,upperdir=%s,workdir=%s",
 			lowerspec, node->upper, node->work);
 	else
 		snprintf(options, sizeof(options),
-			"lowerdir=/%s,workdir=%s",
+			"userxattr,lowerdir=/%s,workdir=%s",
 			lowerspec, node->work);
 
-	trace("Mounting %s file system on %s (lower=%s)\n", node->fstype, node->relative_path, lowerspec);
+	trace("Mounting %s file system on %s (options=%s)\n", node->fstype, node->relative_path, options);
 	if (mount("wormhole", node->mountpoint, "overlay", MS_NOATIME|MS_LAZYTIME, options) < 0) {
 		log_error("Unable to mount %s: %m\n", node->mountpoint);
 		free(lowerspec);

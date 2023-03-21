@@ -1703,10 +1703,10 @@ fsutil_mount_overlay(const char *lowerdir, const char *upperdir, const char *wor
 		if (!fsutil_tempdir_mount(&empty))
 			return false;
 
-		snprintf(options, sizeof(options), "lowerdir=%s:%s", fsutil_tempdir_path(&empty), lowerdir);
+		snprintf(options, sizeof(options), "userxattr,lowerdir=%s:%s", fsutil_tempdir_path(&empty), lowerdir);
 		flags |= MS_RDONLY;
 	} else {
-		snprintf(options, sizeof(options), "lowerdir=%s,upperdir=%s,workdir=%s",
+		snprintf(options, sizeof(options), "userxattr,lowerdir=%s,upperdir=%s,workdir=%s",
 				lowerdir, upperdir, workdir);
 
 		/* Try to avoid nasty messages in dmesg */
