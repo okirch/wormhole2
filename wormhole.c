@@ -82,6 +82,7 @@ mount_farm_discover_system_mounts(struct mount_farm *farm)
 	struct fstree *fstree = NULL;
 	struct fstree_iter *it;
 	struct fstree_node *node;
+	bool okay = false;
 
 	trace("Discovering system mounts");
 
@@ -110,6 +111,9 @@ mount_farm_discover_system_mounts(struct mount_farm *farm)
 		}
 
 		new_mount = mount_farm_add_transparent(farm, node->relative_path, NULL);
+		if (new_mount == NULL)
+			goto out;
+
 		if (node->fsname && node->fsname[0] == '/' && fsutil_isblk(node->fsname)) {
 			/* this is a mount of an actual block based file system */
 			trace("%s is a mount of %s", node->relative_path, node->fsname);
@@ -121,9 +125,15 @@ mount_farm_discover_system_mounts(struct mount_farm *farm)
 		}
 	}
 
+	okay = true;
+
+out:
+	if (!okay)
+		log_error("System mount discovery failed");
+
 	fstree_iterator_free(it);
 	fstree_free(fstree);
-	return true;
+	return okay;
 }
 
 static bool
