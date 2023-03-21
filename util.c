@@ -36,6 +36,7 @@
 #include <errno.h>
 #include <assert.h>
 #include <ctype.h>
+#include <wordexp.h>
 
 #include "tracing.h"
 #include "util.h"
@@ -168,6 +169,32 @@ pathutil_concat2(char **path_p, const char *parent, const char *name)
 
 	strutil_set(path_p, NULL);
 	*path_p = pathutil_sanitize(path);
+}
+
+/*
+ * Do tilde expansion on path name
+ */
+char *
+pathutil_expand(const char *orig_path, bool quiet)
+{
+	wordexp_t words;
+	char *result = NULL;
+
+	memset(&words, 0, sizeof(words));
+	if (wordexp(orig_path, &words, WRDE_NOCMD) != 0) {
+		if (!quiet)
+			log_error("Cannot expand path \"%s\": %m", orig_path);
+		return NULL;
+	}
+
+	if (words.we_wordc == 1) {
+		result = strdup(words.we_wordv[0]);
+	} else if (!quiet) {
+		log_error("Path expansion of \"%s\" produced %u results", orig_path, words.we_wordc);
+	}
+
+	wordfree(&words);
+	return result;
 }
 
 bool
