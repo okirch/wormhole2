@@ -94,6 +94,15 @@ struct wormhole_layer {
 	struct strutil_array	used;
 };
 
+enum {
+	PURPOSE_NONE,
+	PURPOSE_BUILD,
+	PURPOSE_USE,
+	PURPOSE_BOOT,
+
+	__PURPOSE_MESSING_AROUND,
+};
+
 struct wormhole_context {
 	unsigned int		purpose;
 	int			exit_status;

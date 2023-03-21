@@ -283,15 +283,6 @@ run_the_command(struct wormhole_context *ctx)
 	return ctx->exit_status;
 }
 
-enum {
-	PURPOSE_NONE,
-	PURPOSE_BUILD,
-	PURPOSE_USE,
-	PURPOSE_BOOT,
-
-	__PURPOSE_MESSING_AROUND,
-};
-
 bool
 wormhole_layer_patch_rpmdb(struct wormhole_layer *layer, const char *rpmdb_orig, const char *image_root)
 {
