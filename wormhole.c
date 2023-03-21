@@ -398,10 +398,14 @@ wormhole_context_set_build(struct wormhole_context *ctx, const char *name, int t
 	wormhole_context_set_purpose(ctx, PURPOSE_BUILD);
 	strutil_set(&ctx->build_target, name);
 	ctx->build_target_type = type;
+}
 
+static void
+wormhole_context_set_build_defaults(struct wormhole_context *ctx)
+{
 	/* Set the default build root */
 	if (ctx->build_root == NULL) {
-		ctx->build_root = wormhole_layer_make_user_path(ctx->build_target);
+		ctx->build_root = wormhole_layer_make_path(ctx->build_target, ctx->build_target_type);
 		if (ctx->build_root == NULL)
 			log_fatal("Unable to determine layer path for build target %s", ctx->build_target);
 	}
@@ -936,6 +940,9 @@ do_build(struct wormhole_context *ctx)
 {
 	struct wormhole_layer *layer;
 	unsigned int i;
+
+	/* Set the build root etc. */
+	wormhole_context_set_build_defaults(ctx);
 
 #if 0
 	if (!ctx->use_privileged_namespace) {

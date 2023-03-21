@@ -23,12 +23,13 @@
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
-#include <wordexp.h>
 
 #include "wormhole2.h"
 #include "paths.h"
 #include "tracing.h"
 #include "util.h"
+
+static char *	wormhole_layer_make_user_path(const char *name);
 
 struct wormhole_layer *
 wormhole_layer_new(const char *name, const char *path, unsigned int depth)
@@ -440,27 +441,28 @@ wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm 
 /*
  * Given a layer name, build the path name to the user-private layer directory
  */
-char *
+static char *
 wormhole_layer_make_user_path(const char *name)
 {
 	char pathbuf[PATH_MAX];
-	wordexp_t words;
-	char *result = NULL;
 
 	snprintf(pathbuf, sizeof(pathbuf), "%s/%s", WORMHOLE_USER_LAYER_BASE_PATH, name);
+	return pathutil_expand(pathbuf, false);
+}
 
-	memset(&words, 0, sizeof(words));
-	if (wordexp(pathbuf, &words, WRDE_NOCMD) != 0) {
-		log_error("Cannot expand path \"%s\": %m", pathbuf);
-		return NULL;
-	}
+static char *
+wormhole_layer_make_system_path(const char *name)
+{
+	char *result = NULL;
 
-	if (words.we_wordc != 1) {
-		log_error("Path expansion of \"%s\" produced %u results", pathbuf, words.we_wordc);
-	} else {
-		result = strdup(words.we_wordv[0]);
-	}
-
-	wordfree(&words);
+	pathutil_concat2(&result, WORMHOLE_LAYER_BASE_PATH, name);
 	return result;
+}
+
+char *
+wormhole_layer_make_path(const char *target_name, int target_type)
+{
+	if (target_type == BUILD_USER_LAYER)
+		return wormhole_layer_make_user_path(target_name);
+	return wormhole_layer_make_system_path(target_name);
 }
