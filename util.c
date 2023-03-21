@@ -2040,6 +2040,32 @@ strutil_array_join(const struct strutil_array *a, const char *sepa)
 	return result;
 }
 
+void
+strutil_split(const char *string, const char *sepa, struct strutil_array *result)
+{
+	char *copy, *s, *next = NULL;
+	unsigned int sepa_len;
+
+	if (!string)
+		return;
+
+	if (!sepa || !(sepa_len = strlen(sepa))) {
+		strutil_array_append(result, string);
+		return;
+	}
+
+	next = copy = strdup(string);
+	while ((s = strstr(next, sepa)) != NULL) {
+		*s = '\0';
+
+		strutil_array_append(result, next);
+		next = s + sepa_len;
+	}
+
+	if (next)
+		strutil_array_append(result, next);
+}
+
 /*
  * Sort string array
  */

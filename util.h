@@ -184,6 +184,7 @@ extern void			strutil_array_append_array(struct strutil_array *, const struct st
 extern void			strutil_array_sort(struct strutil_array *);
 extern void			strutil_array_destroy(struct strutil_array *);
 extern char *			strutil_array_join(const struct strutil_array *, const char *sepa);
+extern void			strutil_split(const char *string, const char *sepa, struct strutil_array *result);
 
 struct pathutil_parser {
 	const char *	relative_path;
