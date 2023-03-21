@@ -305,6 +305,9 @@ wormhole_context_new(void)
 	ctx->purpose = PURPOSE_NONE;
 	ctx->exit_status = 5;
 
+	/* The default is to map the caller's uid/gid to 0 inside the new user namespace */
+	ctx->map_caller_to_root = true;
+
 	ctx->working_directory = get_current_dir_name();
 
 	fsutil_tempdir_init(&ctx->temp);
@@ -388,7 +391,7 @@ wormhole_context_detach(struct wormhole_context *ctx)
 		if (!wormhole_create_namespace())
 			return false;
 	} else {
-		if (!wormhole_create_user_namespace(true))
+		if (!wormhole_create_user_namespace(ctx->map_caller_to_root))
 			return false;
 	}
 
@@ -901,6 +904,8 @@ do_run(struct wormhole_context *ctx)
 enum {
 	OPT_RPMDB = 256,
 	OPT_BOOT,
+	OPT_RUNAS_ROOT,
+	OPT_RUNAS_USER,
 };
 
 static struct option	long_options[] = {
@@ -911,6 +916,8 @@ static struct option	long_options[] = {
 	{ "use",	required_argument,	NULL,	'u'		},
 	{ "layer",	required_argument,	NULL,	'L'		},
 	{ "rpmdb",	no_argument,		NULL,	OPT_RPMDB	},
+	{ "run-as-root",no_argument,		NULL,	OPT_RUNAS_ROOT	},
+	{ "run-as-user",no_argument,		NULL,	OPT_RUNAS_USER	},
 
 	{ NULL },
 };
@@ -949,6 +956,14 @@ main(int argc, char **argv)
 
 		case OPT_RPMDB:
 			ctx->manage_rpmdb = true;
+			break;
+
+		case OPT_RUNAS_ROOT:
+			ctx->map_caller_to_root = true;
+			break;
+
+		case OPT_RUNAS_USER:
+			ctx->map_caller_to_root = false;
 			break;
 
 		default:
