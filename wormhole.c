@@ -743,15 +743,17 @@ out:
 	return ctx->exit_status;
 }
 
-static int
+static bool
 prune_new_image(struct wormhole_context *ctx)
 {
 	char *image_root = NULL;
 	struct fstree_iter *it;
 	struct fstree_node *node;
 
-	pathutil_concat2(&image_root, ctx->build_root, "image");
+	if (!prepare_tree_for_building(ctx, false))
+		return false;
 
+	pathutil_concat2(&image_root, ctx->build_root, "image");
 	trace("Pruning image tree:");
 	it = fstree_iterator_new(ctx->farm->tree, true);
 	while ((node = fstree_iterator_next(it)) != NULL) {
@@ -782,7 +784,7 @@ prune_new_image(struct wormhole_context *ctx)
 
 	trace("Removing work tree at %s/work", ctx->build_root);
 	fsutil_remove_recursively(__pathutil_concat2(ctx->build_root, "work"));
-	return 0;
+	return true;
 }
 
 static int
@@ -816,9 +818,6 @@ __perform_build(struct wormhole_context *ctx)
 
 	if (run_the_command(ctx) != 0)
 		goto out;
-
-	trace("Now perform the pruning");
-	ctx->exit_status = prune_new_image(ctx);
 
 out:
 	return ctx->exit_status;
@@ -881,6 +880,9 @@ do_build(struct wormhole_context *ctx)
 
 	/* Now post-process the build. */
 	trace("Post-process build result");
+
+	if (!prune_new_image(ctx))
+		return;
 
 	layer = wormhole_layer_new(ctx->build_target, ctx->build_root, 0);
 	for (i = 0; i < ctx->layer_names.count; ++i) {
