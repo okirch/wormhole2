@@ -393,10 +393,11 @@ wormhole_context_set_purpose(struct wormhole_context *ctx, unsigned int purpose)
 }
 
 void
-wormhole_context_set_build(struct wormhole_context *ctx, const char *name)
+wormhole_context_set_build(struct wormhole_context *ctx, const char *name, int type)
 {
 	wormhole_context_set_purpose(ctx, PURPOSE_BUILD);
 	strutil_set(&ctx->build_target, name);
+	ctx->build_target_type = type;
 
 	/* Set the default build root */
 	if (ctx->build_root == NULL) {
@@ -1039,17 +1040,23 @@ do_run(struct wormhole_context *ctx)
 }
 
 enum {
-	OPT_RPMDB = 256,
+	OPT_BUILD_USER_LAYER = 256,
+	OPT_BUILD_SYSTEM_LAYER,
 	OPT_BOOT,
 	OPT_RUNAS_ROOT,
 	OPT_RUNAS_USER,
 	OPT_AUTO_ENTRY_POINTS,
 	OPT_NO_AUTO_ENTRY_POINTS,
+	OPT_RPMDB,
 };
 
 static struct option	long_options[] = {
 	{ "debug",	no_argument,		NULL,	'd'		},
-	{ "build",	required_argument,	NULL,	'B'		},
+	{ "build",	required_argument,	NULL,	OPT_BUILD_USER_LAYER },
+	{ "build-user-layer",
+			required_argument,	NULL,	OPT_BUILD_USER_LAYER },
+	{ "build-system-layer",
+			required_argument,	NULL,	OPT_BUILD_SYSTEM_LAYER },
 	{ "boot",	required_argument,	NULL,	OPT_BOOT	},
 	{ "buildroot",	required_argument,	NULL,	'R'		},
 	{ "use",	required_argument,	NULL,	'u'		},
@@ -1077,7 +1084,12 @@ main(int argc, char **argv)
 	while ((c = getopt_long(argc, argv, "B:dL:R:u:", long_options, NULL)) != EOF) {
 		switch (c) {
 		case 'B':
-			wormhole_context_set_build(ctx, optarg);
+		case OPT_BUILD_USER_LAYER:
+			wormhole_context_set_build(ctx, optarg, BUILD_USER_LAYER);
+			break;
+
+		case OPT_BUILD_SYSTEM_LAYER:
+			wormhole_context_set_build(ctx, optarg, BUILD_SYSTEM_LAYER);
 			break;
 
 		case OPT_BOOT:

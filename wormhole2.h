@@ -103,6 +103,11 @@ enum {
 	__PURPOSE_MESSING_AROUND,
 };
 
+enum {
+	BUILD_USER_LAYER,
+	BUILD_SYSTEM_LAYER,
+};
+
 struct wormhole_context {
 	unsigned int		purpose;
 	int			exit_status;
@@ -121,6 +126,7 @@ struct wormhole_context {
 	struct wormhole_layer_array layers;
 
 	/* PURPOSE_BUILD */
+	int			build_target_type;
 	char *			build_target;
 	char *			build_root;
 
