@@ -192,6 +192,61 @@ fstree_node_lookup(struct fstree_node *parent, const char *relative_path, bool c
 	return node;
 }
 
+bool
+fstree_drop_pattern(struct fstree *fstree, const char *pattern, struct strutil_array *dropped)
+{
+	struct pathutil_parser path_parser;
+	struct fstree_node *node = NULL, **pos;
+
+	pathutil_parser_init(&path_parser, pattern);
+
+	/* If the path is empty, return the node itself */
+	node = fstree->root;
+	pos = &fstree->root;
+
+	while (pathutil_parser_next(&path_parser)) {
+		const char *name = path_parser.namebuf;
+
+		if (!strcmp(name, "*")) {
+			struct fstree_node *child = NULL;
+
+			/* drop all children */
+			while ((child = node->children) != NULL) {
+				if (dropped)
+					strutil_array_append(dropped, child->relative_path);
+				node->children = child->next;
+				fstree_node_free(child);
+			}
+			return true;
+		}
+
+		if (strchr(name, '*') || strchr(name, '?')) {
+			log_error("%s: Cannot handle pattern \"%s\"", __func__, pattern);
+			return false;
+		}
+
+		while ((node = *pos) != NULL) {
+			if (!strcmp(node->name, name))
+				break;
+			pos = &(node->next);
+		}
+
+		if (node == NULL)
+			return false;
+
+		pos = &node->children;
+	}
+
+	if (node) {
+		if (dropped)
+			strutil_array_append(dropped, node->relative_path);
+		*pos = node->next;
+		fstree_node_free(node);
+	}
+
+	return node;
+}
+
 char *
 fstree_node_relative_path(struct fstree_node *ancestor, struct fstree_node *node)
 {

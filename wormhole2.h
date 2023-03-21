@@ -139,6 +139,7 @@ extern bool			fstree_discover(const char *mtab,
 					void *user_data);
 extern struct fstree_node *	fstree_add_export(struct fstree *fstree, const char *system_path,
 					unsigned int export_type, struct wormhole_layer *layer);
+extern bool			fstree_drop_pattern(struct fstree *fstree, const char *pattern, struct strutil_array *dropped);
 extern void			fstree_print(struct fstree *tree);
 
 extern struct fstree_iter *	fstree_iterator_new(struct fstree *fstree, bool depth_first);
