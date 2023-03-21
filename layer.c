@@ -261,6 +261,23 @@ wormhole_layer_write_wrapper(struct wormhole_layer *layer, const char *app_path)
 	return true;
 }
 
+bool
+wormhole_layer_write_wrappers(struct wormhole_layer *layer)
+{
+	unsigned int i;
+	bool ok = true;
+
+	trace("=== Creating wrapper scripts ===");
+	for (i = 0; i < layer->entry_points.count; ++i) {
+		const char *app_path = layer->entry_points.data[i];
+
+		if (!wormhole_layer_write_wrapper(layer, app_path))
+			ok = false;
+	}
+
+	return ok;
+}
+
 /*
  * Remount /usr/lib/platform/layers/foobar to some tmpfs to shorten the path.
  */

@@ -86,6 +86,7 @@ struct wormhole_layer {
 
 	struct strutil_array	stacked_directories;
 	struct strutil_array	transparent_directories;
+	struct strutil_array	entry_points;
 
 	/* if 0, referenced by command line */
 	unsigned int		depth;
@@ -180,6 +181,7 @@ extern void			wormhole_layer_release(struct wormhole_layer *layer);
 extern bool			wormhole_layer_load_config(struct wormhole_layer *layer);
 extern bool			wormhole_layer_save_config(struct wormhole_layer *layer);
 extern bool			wormhole_layer_remount_image(struct wormhole_layer *layer, const char *image_base);
+extern bool			wormhole_layer_write_wrappers(struct wormhole_layer *layer);
 extern bool			wormhole_layer_write_wrapper(struct wormhole_layer *layer, const char *app_path);
 extern void			wormhole_layer_array_append(struct wormhole_layer_array *a, struct wormhole_layer *layer);
 extern void			wormhole_layer_array_append_unique(struct wormhole_layer_array *a, struct wormhole_layer *layer);

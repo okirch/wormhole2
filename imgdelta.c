@@ -554,19 +554,9 @@ update_image_work(struct imgdelta_config *cfg, const char *tpath)
 	if (!copy_recursively(upperdir, cfg->layer->image_path))
 		return 1;
 
-	if (cfg->entry_points.count) {
-		trace("=== Creating wrapper scripts ===");
-
-		for (i = 0; i < cfg->entry_points.count; ++i) {
-			const char *app_path = cfg->entry_points.data[i];
-
-			if (!wormhole_layer_write_wrapper(cfg->layer, app_path))
-				rv = 1;
-		}
-
-		if (rv)
-			return rv;
-	}
+	/* If the config calls out any entry points, add them to the layer config
+	 * so that the corresponding wrapper scripts get created in layer/bin */
+	strutil_array_append_array(&cfg->layer->entry_points, &cfg->entry_points);
 
 	return 0;
 }
@@ -923,6 +913,12 @@ main(int argc, char **argv)
 
 	if (rv == 0)
 		rv = write_layer_config(&config);
+
+	if (rv == 0 && config.layer->entry_points.count) {
+		trace("=== Creating wrapper scripts ===");
+		if (!wormhole_layer_write_wrappers(config.layer))
+			rv = 1;
+	}
 
 	return rv;
 }
