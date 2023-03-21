@@ -391,7 +391,7 @@ fstree_node_mount(const struct fstree_node *node)
 				bind_source = __pathutil_concat2(node->bind_mount_override_layer->image_path, bind_source);
 
 			trace("Bind mounting %s on %s\n", bind_source, node->relative_path);
-			return fsutil_mount_bind(bind_source, node->mountpoint, false);
+			return fsutil_mount_bind(bind_source, node->mountpoint, true);
 		}
 
 		trace("Mounting %s file system on %s\n", node->fstype, node->relative_path);
