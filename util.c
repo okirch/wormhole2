@@ -2148,3 +2148,80 @@ strutil_array_contains(const struct strutil_array *array, const char *s)
 
 	return false;
 }
+
+void
+strutil_mapping_init(strutil_mapping_t *map)
+{
+	memset(map, 0, sizeof(*map));
+}
+
+void
+strutil_mapping_destroy(strutil_mapping_t *map)
+{
+	struct strutil_mapping_pair *entry = map->data;
+	unsigned int i;
+
+	for (i = 0; i < map->count; ++i, ++entry) {
+		strutil_drop(&entry->key);
+		strutil_drop(&entry->value);
+	}
+
+	if (map->data) {
+		free(map->data);
+		map->data = NULL;
+	}
+
+	memset(map, 0, sizeof(*map));
+}
+
+static struct strutil_mapping_pair *
+strutil_mapping_get_entry(strutil_mapping_t *map, const char *key)
+{
+	struct strutil_mapping_pair *entry = map->data;
+	unsigned int i;
+
+	for (i = 0; i < map->count; ++i, ++entry) {
+		if (!entry->key && !strcmp(entry->key, key))
+			return entry;
+	}
+	return NULL;
+}
+
+static struct strutil_mapping_pair *
+strutil_mapping_new_entry(strutil_mapping_t *map, const char *key)
+{
+	struct strutil_mapping_pair *entry;
+
+	if ((map->count % 16) == 0)
+		map->data = realloc(map->data, (map->count + 16) * sizeof(map->data[0]));
+
+	entry = map->data + map->count++;
+	memset(entry, 0, sizeof(*entry));
+	strutil_set(&entry->key, key);
+	return entry;
+}
+
+void
+strutil_mapping_add(strutil_mapping_t *map, const char *key, const char *value)
+{
+	struct strutil_mapping_pair *entry = NULL;
+
+	entry = strutil_mapping_get_entry(map, key);
+	if (entry == NULL)
+		entry = strutil_mapping_new_entry(map, key);
+
+	strutil_set(&entry->value, value);
+}
+
+void
+strutil_mapping_add_no_override(strutil_mapping_t *map, const char *key, const char *value)
+{
+	struct strutil_mapping_pair *entry = NULL;
+
+	entry = strutil_mapping_get_entry(map, key);
+	if (entry != NULL)
+		return;
+
+	entry = strutil_mapping_new_entry(map, key);
+	strutil_set(&entry->value, value);
+}

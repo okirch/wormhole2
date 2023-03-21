@@ -232,4 +232,17 @@ enum {
 extern int			fsutil_inode_compare(const char *path1, const char *path2);
 extern bool			fsutil_file_content_identical(const char *path1, const char *path2);
 
+typedef struct strutil_mapping {
+	unsigned int		count;
+	struct strutil_mapping_pair {
+		char *		key;
+		char *		value;
+	} *data;
+} strutil_mapping_t;
+
+extern void			strutil_mapping_init(strutil_mapping_t *);
+extern void			strutil_mapping_destroy(strutil_mapping_t *);
+extern void			strutil_mapping_add(strutil_mapping_t *, const char *key, const char *value);
+extern void			strutil_mapping_add_no_override(strutil_mapping_t *, const char *key, const char *value);
+
 #endif // _WORMHOLE_UTIL_H
