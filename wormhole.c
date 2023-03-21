@@ -362,6 +362,9 @@ wormhole_context_new(void)
 	/* The default is to map the caller's uid/gid to 0 inside the new user namespace */
 	ctx->map_caller_to_root = true;
 
+	/* The default for building new layers is to auto-discover new entry points. */
+	ctx->auto_entry_points = true;
+
 	ctx->working_directory = get_current_dir_name();
 
 	fsutil_tempdir_init(&ctx->temp);
@@ -862,6 +865,70 @@ record_modified_mounts_to_layer(struct wormhole_context *ctx, struct wormhole_la
 	return true;
 }
 
+/*
+ * Discover applications in PATH directories
+ */
+static void
+__discover_entry_points(struct wormhole_layer *layer, const char *bindir)
+{
+	char pathbuf[PATH_MAX];
+	DIR *dir;
+	struct dirent *d;
+
+	snprintf(pathbuf, sizeof(pathbuf), "%s%s", layer->image_path, bindir);
+	trace2("Searching %s for applications", pathbuf);
+
+	if (!(dir = opendir(pathbuf))) {
+		trace3("%s: %m", pathbuf);
+		return;
+	}
+
+	while ((d = readdir(dir)) != NULL) {
+		int dtype = d->d_type;
+
+		/* awscli creates absolute symlinks /usr/local/bin -> /usr/local/aws-cli/v2/current/bin/aws */
+		if (dtype != DT_REG && dtype != DT_LNK)
+			continue;
+
+		/* FIXME: should we check for +x permissions? */
+
+		snprintf(pathbuf, sizeof(pathbuf), "%s/%s", bindir, d->d_name);
+		strutil_array_append(&layer->entry_points, pathbuf);
+	}
+
+	closedir(dir);
+}
+
+void
+discover_entry_points(struct wormhole_layer *layer)
+{
+	const char *PATH[] = {
+		"/bin",
+		"/sbin",
+		"/usr/bin",
+		"/usr/local/bin",
+		"/opt/bin",
+		NULL
+	};
+	const char **pos, *bindir;
+	unsigned int last, count;
+
+	last = layer->entry_points.count;
+	for (pos = PATH; (bindir = *pos++) != NULL; )
+		__discover_entry_points(layer, bindir);
+
+	count = layer->entry_points.count - last;
+	if (count == 0) {
+		trace("No entry points discovered");
+	} else {
+		trace("Discovered %u entry points", count);
+		while (last < layer->entry_points.count) {
+			const char *path = layer->entry_points.data[last++];
+
+			trace("  entry point %s", path);
+		}
+	}
+}
 
 static void
 do_build(struct wormhole_context *ctx)
@@ -908,6 +975,14 @@ do_build(struct wormhole_context *ctx)
 
 	if (!wormhole_layer_save_config(layer)) {
 		log_error("Unable to write configuration for new layer");
+		return;
+	}
+
+	if (ctx->auto_entry_points)
+		discover_entry_points(layer);
+
+	if (!wormhole_layer_write_wrappers(layer)) {
+		log_error("Unable to create wrapper scripts for new layer");
 		return;
 	}
 
@@ -968,6 +1043,8 @@ enum {
 	OPT_BOOT,
 	OPT_RUNAS_ROOT,
 	OPT_RUNAS_USER,
+	OPT_AUTO_ENTRY_POINTS,
+	OPT_NO_AUTO_ENTRY_POINTS,
 };
 
 static struct option	long_options[] = {
@@ -980,6 +1057,10 @@ static struct option	long_options[] = {
 	{ "rpmdb",	no_argument,		NULL,	OPT_RPMDB	},
 	{ "run-as-root",no_argument,		NULL,	OPT_RUNAS_ROOT	},
 	{ "run-as-user",no_argument,		NULL,	OPT_RUNAS_USER	},
+	{ "auto-entry-points",
+			no_argument,		NULL,	OPT_AUTO_ENTRY_POINTS },
+	{ "no-auto-entry-points",
+			no_argument,		NULL,	OPT_NO_AUTO_ENTRY_POINTS },
 
 	{ NULL },
 };
@@ -1026,6 +1107,14 @@ main(int argc, char **argv)
 
 		case OPT_RUNAS_USER:
 			ctx->map_caller_to_root = false;
+			break;
+
+		case OPT_AUTO_ENTRY_POINTS:
+			ctx->auto_entry_points = true;
+			break;
+
+		case OPT_NO_AUTO_ENTRY_POINTS:
+			ctx->auto_entry_points = false;
 			break;
 
 		default:
