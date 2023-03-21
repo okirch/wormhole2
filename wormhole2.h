@@ -129,6 +129,7 @@ struct wormhole_context {
 	int			build_target_type;
 	char *			build_target;
 	char *			build_root;
+	char *			build_bindir;
 
 	/* PURPOSE_BOOT */
 	char *			boot_device;
@@ -198,8 +199,7 @@ extern void			wormhole_layer_release(struct wormhole_layer *layer);
 extern bool			wormhole_layer_load_config(struct wormhole_layer *layer);
 extern bool			wormhole_layer_save_config(struct wormhole_layer *layer);
 extern bool			wormhole_layer_remount_image(struct wormhole_layer *layer, const char *image_base);
-extern bool			wormhole_layer_write_wrappers(struct wormhole_layer *layer);
-extern bool			wormhole_layer_write_wrapper(struct wormhole_layer *layer, const char *app_path);
+extern bool			wormhole_layer_write_wrappers(struct wormhole_layer *layer, const char *install_bindir);
 extern void			wormhole_layer_array_append(struct wormhole_layer_array *a, struct wormhole_layer *layer);
 extern void			wormhole_layer_array_append_unique(struct wormhole_layer_array *a, struct wormhole_layer *layer);
 extern struct wormhole_layer *	wormhole_layer_array_find(struct wormhole_layer_array *a, const char *name);

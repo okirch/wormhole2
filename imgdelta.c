@@ -916,7 +916,12 @@ main(int argc, char **argv)
 
 	if (rv == 0 && config.layer->entry_points.count) {
 		trace("=== Creating wrapper scripts ===");
-		if (!wormhole_layer_write_wrappers(config.layer))
+
+		/* Create wrapper scripts for the utilities mentioned by the
+		 * config file.
+		 * For the time being, do not create symlinks in /usr/bin yet
+		 */
+		if (!wormhole_layer_write_wrappers(config.layer, NULL))
 			rv = 1;
 	}
 

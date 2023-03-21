@@ -244,20 +244,21 @@ wormhole_layer_save_config(struct wormhole_layer *layer)
 /*
  * For a given entry point, create a wrapper scripts
  */
-bool
-wormhole_layer_write_wrapper(struct wormhole_layer *layer, const char *app_path)
+static bool
+wormhole_layer_write_wrapper(struct wormhole_layer *layer, const char *app_path, const char *install_bindir)
 {
-	const char *wrapper_path;
+	char *wrapper_path = NULL, *symlink_path = NULL;
+	bool ok = false;
 	FILE *fp;
 
 	trace("Creating wrapper script for %s", app_path);
 	if (!fsutil_makedirs(layer->wrapper_path, 0755))
-		return false;
+		goto out;
 
-	wrapper_path = __pathutil_concat2(layer->wrapper_path, basename(app_path));
+	pathutil_concat2(&wrapper_path, layer->wrapper_path, basename(app_path));
 	if (!(fp = fopen(wrapper_path, "w"))) {
 		log_error("%s: %m", wrapper_path);
-		return false;
+		goto out;
 	}
 
 	fprintf(fp, "#!/bin/bash\n");
@@ -268,14 +269,31 @@ wormhole_layer_write_wrapper(struct wormhole_layer *layer, const char *app_path)
 
 	if (chmod(wrapper_path, 0555) < 0) {
 		log_error("cannot chmod %s: %m", wrapper_path);
-		return false;
+		goto out;
 	}
 
-	return true;
+	if (install_bindir) {
+		pathutil_concat2(&symlink_path, install_bindir, basename(app_path));
+
+		trace("  install symlink %s -> %s", symlink_path, wrapper_path);
+		(void) unlink(symlink_path);
+		if (symlink(wrapper_path, symlink_path) < 0) {
+			log_error("Cannot create symlink %s -> %s: %m",
+					symlink_path, wrapper_path);
+			goto out;
+		}
+	}
+
+	ok = true;
+
+out:
+	strutil_drop(&wrapper_path);
+	strutil_drop(&symlink_path);
+	return ok;
 }
 
 bool
-wormhole_layer_write_wrappers(struct wormhole_layer *layer)
+wormhole_layer_write_wrappers(struct wormhole_layer *layer, const char *install_bindir)
 {
 	unsigned int i;
 	bool ok = true;
@@ -284,7 +302,7 @@ wormhole_layer_write_wrappers(struct wormhole_layer *layer)
 	for (i = 0; i < layer->entry_points.count; ++i) {
 		const char *app_path = layer->entry_points.data[i];
 
-		if (!wormhole_layer_write_wrapper(layer, app_path))
+		if (!wormhole_layer_write_wrapper(layer, app_path, install_bindir))
 			ok = false;
 	}
 

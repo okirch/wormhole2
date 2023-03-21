@@ -414,9 +414,24 @@ wormhole_context_set_build_defaults(struct wormhole_context *ctx)
 		if (!ctx->force)
 			log_fatal("%s already exists, timidly refusing to proceed", ctx->build_root);
 
+		/* FIXME: we should probably build the new layer in a .tmp location and then
+		 * move it into place. */
 		if (!fsutil_remove_recursively(ctx->build_root))
 			log_fatal("failed to remove previous build of %s (located in %s)",
 					ctx->build_target, ctx->build_root);
+	}
+
+	if (ctx->build_bindir == NULL && ctx->build_target_type == BUILD_USER_LAYER) {
+		char *bindir = pathutil_expand(WORMHOLE_USER_BIN_DIR, true);
+
+		if (bindir == NULL) {
+			/* nothing */
+		} else
+		if (bindir && fsutil_isdir(bindir)) {
+			ctx->build_bindir = bindir;
+		} else {
+			strutil_drop(&bindir);
+		}
 	}
 }
 
@@ -989,7 +1004,7 @@ do_build(struct wormhole_context *ctx)
 	if (ctx->auto_entry_points)
 		discover_entry_points(layer);
 
-	if (!wormhole_layer_write_wrappers(layer)) {
+	if (!wormhole_layer_write_wrappers(layer, ctx->build_bindir)) {
 		log_error("Unable to create wrapper scripts for new layer");
 		return;
 	}
