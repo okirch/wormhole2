@@ -132,12 +132,6 @@ struct fstree *			fstree_new(const char *root_path);
 extern void			fstree_free(struct fstree *fstree);
 extern struct fstree_node *	fstree_create_leaf(struct fstree *fstree, const char *relative_path);
 extern const char *		fstree_get_full_path(struct fstree *fstree, const char *relative_path);
-extern bool			fstree_discover(const char *mtab,
-					bool (*report_fn)(void *user_data,
-							const char *mount_point,
-							const char *mnt_type,
-							const char *fsname),
-					void *user_data);
 extern struct fstree_node *	fstree_add_export(struct fstree *fstree, const char *system_path,
 					unsigned int export_type, struct wormhole_layer *layer);
 extern bool			fstree_drop_pattern(struct fstree *fstree, const char *pattern, struct strutil_array *dropped);
