@@ -37,6 +37,13 @@
 #include "wormhole2.h"
 #include "tracing.h"
 
+/* We never copy over the permission following bits:
+ * suid, sgid: s-bits are ignored in user namespaces, anyway
+ * world write: it does not make sense to have world writable dirs in an image
+ * sticky: if it's not world writable, then why should it have a sticky bit
+ */
+#define COPY_PERMISSION_MASK	(~(S_IFMT | S_ISUID | S_ISGID | S_ISVTX | S_IWOTH))
+
 #define CMP_TYPE_CHANGED	0x0001
 #define CMP_MODE_CHANGED	0x0002
 #define CMP_CONTENT_CHANGED	0x0004
@@ -70,12 +77,13 @@ detect_changes(const char *patha, const struct stat *sta, const char *pathb, con
 	unsigned long mode_xor;
 	int bits_changed = 0;
 
-	mode_xor = (sta->st_mode ^ stb->st_mode) & ~(S_ISUID | S_ISGID);
+	mode_xor = (sta->st_mode ^ stb->st_mode);
 	if (mode_xor & S_IFMT) {
 		trace3("%s: file type changed", patha);
 		return ~0; /* type changed, update everything */
 	}
 
+	mode_xor &= COPY_PERMISSION_MASK;
 	if (mode_xor != 0) {
 		trace3("%s: mode changed 0%o -> 0%o", patha, sta->st_mode, stb->st_mode);
 		bits_changed |= CMP_MODE_CHANGED;
@@ -157,7 +165,7 @@ __image_update_attrs(const char *image_path, const struct stat *stb)
 	 * bits are ignored in user namespaces, anyway. Two, OBS will complain loudly if
 	 * we package an image that has suid binaries in unexpected places. */
 	if (!S_ISLNK(stb->st_mode)) {
-		mode_t mode = stb->st_mode & 01777;
+		mode_t mode = stb->st_mode & COPY_PERMISSION_MASK;
 
 		if (fchmodat(dirfd, base_name, mode, 0) < 0)
 			log_warning("%s: cannot set mode 0%03o: %m", image_path, mode);
