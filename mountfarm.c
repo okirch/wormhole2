@@ -39,6 +39,134 @@
 
 static unsigned int	num_mounted;
 
+/*
+ * mount_config objects and arrays
+ */
+struct mount_config *
+mount_config_new(const char *path, int dtype)
+{
+	struct mount_config *mnt;
+
+	if (dtype < 0)
+		dtype = DT_UNKNOWN;
+
+	mnt = calloc(1, sizeof(*mnt));
+	strutil_set(&mnt->path, path);
+	mnt->refcount = 1;
+	mnt->dtype = dtype;
+
+	return mnt;
+}
+
+static void
+mount_config_free(struct mount_config *mnt)
+{
+	assert(mnt->refcount == 0);
+	strutil_drop(&mnt->path);
+	free(mnt);
+}
+
+void
+mount_config_release(struct mount_config *mnt)
+{
+	assert(mnt->refcount);
+	if (--(mnt->refcount) == 0)
+		mount_config_free(mnt);
+}
+
+static inline bool
+__mount_config_update_dtype(struct mount_config *mnt, int dtype)
+{
+	if (dtype < 0)
+		return true;
+
+	if (mnt->dtype == DT_UNKNOWN) {
+		mnt->dtype = dtype;
+	} else if (mnt->dtype != dtype) {
+		log_warning("%s: reconfigured mount from dtype %u to %u",
+				mnt->path, mnt->dtype, dtype);
+		return false;
+	}
+
+	return true;
+}
+
+void
+mount_config_array_init(struct mount_config_array *a)
+{
+	memset(a, 0, sizeof(*a));
+}
+
+void
+mount_config_array_destroy(struct mount_config_array *a)
+{
+	unsigned int i;
+
+	for (i = 0; i < a->count; ++i)
+		mount_config_release(a->data[i]);
+	memset(a, 0, sizeof(*a));
+}
+
+static void
+__mount_config_array_append(struct mount_config_array *a, struct mount_config *mnt)
+{
+	if ((a->count % 16) == 0)
+		a->data = realloc(a->data, (a->count + 16) * sizeof(a->data[0]));
+	a->data[a->count++] = mnt;
+}
+
+static struct mount_config *
+mount_config_array_find(struct mount_config_array *a, const char *path, bool create)
+{
+	struct mount_config *mnt;
+	unsigned int i;
+
+	for (i = 0; i < a->count; ++i) {
+		mnt = a->data[i];
+		if (!strcmp(mnt->path, path))
+			return mnt;
+	}
+
+	if (!create)
+		return NULL;
+
+	mnt = mount_config_new(path, -1);
+	__mount_config_array_append(a, mnt);
+
+	return mnt;
+}
+
+struct mount_config *
+mount_config_array_add(struct mount_config_array *a, const char *path, int dtype)
+{
+	struct mount_config *mnt;
+
+	mnt = mount_config_array_find(a, path, true);
+	if (mnt && !__mount_config_update_dtype(mnt, dtype))
+		return NULL;
+	return mnt;
+}
+
+struct mount_config *
+mount_config_array_append(struct mount_config_array *a, struct mount_config *mnt)
+{
+	struct mount_config *existing;
+
+	existing = mount_config_array_find(a, mnt->path, false);
+	if (existing == NULL) {
+		__mount_config_array_append(a, mnt);
+		return mnt;
+	}
+
+	if (!__mount_config_update_dtype(existing, mnt->dtype))
+		return NULL;
+
+	return existing;
+}
+
+/*
+ * The actual mount farms
+ */
 struct mount_farm *
 mount_farm_new(const char *farm_root)
 {
@@ -314,7 +442,7 @@ mount_farm_percolate(struct mount_farm *farm)
 }
 
 struct fstree_node *
-fstree_add_export(struct fstree *fstree, const char *system_path, unsigned int export_type, struct wormhole_layer *layer)
+fstree_add_export(struct fstree *fstree, const char *system_path, unsigned int export_type, int dtype, struct wormhole_layer *layer)
 {
 	struct fstree_node *node;
 
@@ -332,6 +460,14 @@ fstree_add_export(struct fstree *fstree, const char *system_path, unsigned int e
 		return NULL;
 	}
 
+	if (node->dtype == DT_UNKNOWN || node->dtype < 0)
+		node->dtype = dtype;
+	else if (node->dtype != dtype) {
+		log_error("%s: conflicting file types (%u vs %u)", system_path,
+				node->dtype, dtype);
+		return NULL;
+	}
+
 	if (layer)
 		wormhole_layer_array_append(&node->attached_layers, layer);
 	return node;
@@ -340,13 +476,13 @@ fstree_add_export(struct fstree *fstree, const char *system_path, unsigned int e
 struct fstree_node *
 mount_farm_add_stacked(struct mount_farm *farm, const char *system_path, struct wormhole_layer *layer)
 {
-	return fstree_add_export(farm->tree, system_path, WORMHOLE_EXPORT_STACKED, layer);
+	return fstree_add_export(farm->tree, system_path, WORMHOLE_EXPORT_STACKED, DT_DIR, layer);
 }
 
 struct fstree_node *
-mount_farm_add_transparent(struct mount_farm *farm, const char *system_path, struct wormhole_layer *layer)
+mount_farm_add_transparent(struct mount_farm *farm, const char *system_path, int dtype, struct wormhole_layer *layer)
 {
-	return fstree_add_export(farm->tree, system_path, WORMHOLE_EXPORT_TRANSPARENT, layer);
+	return fstree_add_export(farm->tree, system_path, WORMHOLE_EXPORT_TRANSPARENT, dtype, layer);
 }
 
 bool
@@ -380,9 +516,15 @@ mount_farm_add_missing_children(struct mount_farm *farm, const char *system_path
 
 		child = fstree_node_lookup(dir_node, d->d_name, false);
 		if (child == NULL) {
-			child = mount_farm_add_transparent(farm, __pathutil_concat2(system_path, d->d_name), NULL);
+			const char *path = __pathutil_concat2(system_path, d->d_name);
+			int dtype;
+
+			if ((dtype = fsutil_get_dtype(path)) < 0)
+				goto out;
+
+			child = mount_farm_add_transparent(farm, path, dtype, NULL);
 			if (child == NULL) {
-				log_error("%s: cannot add transparent mount for %s/%s", __func__, system_path, d->d_name);
+				log_error("%s: cannot add transparent mount for %s", __func__, path);
 				goto out;
 			}
 			fstree_node_set_fstype(child, "bind", farm);

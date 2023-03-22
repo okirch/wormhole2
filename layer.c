@@ -72,8 +72,8 @@ wormhole_layer_free(struct wormhole_layer *layer)
 	strutil_set(&layer->image_path, NULL);
 	strutil_set(&layer->wrapper_path, NULL);
 	strutil_set(&layer->rpmdb_path, NULL);
-	strutil_array_destroy(&layer->stacked_directories);
-	strutil_array_destroy(&layer->transparent_directories);
+	mount_config_array_destroy(&layer->stacked_directories);
+	mount_config_array_destroy(&layer->transparent_directories);
 	strutil_array_destroy(&layer->entry_points);
 	strutil_mapping_destroy(&layer->entry_point_symlinks);
 
@@ -164,6 +164,11 @@ __parse_boolean(const char *path, unsigned int line, const char *value, bool *re
 	return false;
 }
 
+static bool
+__parse_mount(struct mount_config_array *a, const char *kwd, char *value, int dtype)
+{
+	return !!mount_config_array_add(a, value, dtype);
+}
 
 bool
 wormhole_layer_load_config(struct wormhole_layer *layer)
@@ -203,10 +208,13 @@ wormhole_layer_load_config(struct wormhole_layer *layer)
 			strutil_array_append(&layer->used, value);
 		} else
 		if (!strcmp(kwd, "stacked-mount")) {
-			strutil_array_append(&layer->stacked_directories, value);
+			okay = __parse_mount(&layer->stacked_directories, kwd, value, DT_DIR);
 		} else
 		if (!strcmp(kwd, "transparent-mount")) {
-			strutil_array_append(&layer->transparent_directories, value);
+			okay = __parse_mount(&layer->transparent_directories, kwd, value, DT_DIR);
+		} else
+		if (!strcmp(kwd, "transparent-file-mount")) {
+			okay = __parse_mount(&layer->transparent_directories, kwd, value, DT_REG);
 		} else {
 			log_error("%s:%u: unsupported directive %s=%s",
 					layer->config_path, line,
@@ -236,10 +244,30 @@ wormhole_layer_save_config(struct wormhole_layer *layer)
 		fprintf(fp, "is-root=true\n");
 	for (i = 0; i < layer->used.count; ++i)
 		fprintf(fp, "use-layer=%s\n", layer->used.data[i]);
-	for (i = 0; i < layer->stacked_directories.count; ++i)
-		fprintf(fp, "stacked-mount=%s\n", layer->stacked_directories.data[i]);
-	for (i = 0; i < layer->transparent_directories.count; ++i)
-		fprintf(fp, "transparent-mount=%s\n", layer->transparent_directories.data[i]);
+	for (i = 0; i < layer->stacked_directories.count; ++i) {
+		struct mount_config *mnt = layer->stacked_directories.data[i];
+
+		if (mnt->dtype != DT_DIR) {
+			log_error("%s: bad dtype %u for %s", __func__, mnt->dtype, mnt->path);
+			return false;
+		}
+		fprintf(fp, "stacked-mount=%s\n", mnt->path);
+	}
+	for (i = 0; i < layer->transparent_directories.count; ++i) {
+		struct mount_config *mnt = layer->transparent_directories.data[i];
+		const char *kwd = NULL;
+
+		if (mnt->dtype == DT_DIR) {
+			kwd = "transparent-mount";
+		} else
+		if (mnt->dtype == DT_REG) {
+			kwd = "transparent-file-mount";
+		} else {
+			log_error("%s: bad dtype %u for %s", __func__, mnt->dtype, mnt->path);
+			return false;
+		}
+		fprintf(fp, "%s=%s\n", kwd, mnt->path);
+	}
 
 	fclose(fp);
 	return true;
@@ -445,15 +473,16 @@ bool
 wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct fstree_node *tree)
 {
 	const struct fstree_node *child;
+	bool okay = true;
 
 	if (tree->export_type == WORMHOLE_EXPORT_ROOT) {
 		/* nothing to be done */
 	} else
 	if (tree->export_type == WORMHOLE_EXPORT_STACKED) {
-		strutil_array_append(&layer->stacked_directories, tree->relative_path);
+		okay = mount_config_array_add(&layer->stacked_directories, tree->relative_path, tree->dtype);
 	} else
 	if (tree->export_type == WORMHOLE_EXPORT_TRANSPARENT) {
-		strutil_array_append(&layer->transparent_directories, tree->relative_path);
+		okay = mount_config_array_add(&layer->transparent_directories, tree->relative_path, tree->dtype);
 	} else
 	if (tree->export_type != WORMHOLE_EXPORT_NONE) {
 		log_error("%s: bad export type %u at %s", __func__, tree->export_type, tree->relative_path);
@@ -465,7 +494,7 @@ wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct
 			return false;
 	}
 
-	return true;
+	return okay;
 }
 
 bool
@@ -475,17 +504,17 @@ wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm 
 	unsigned int i;
 
 	for (i = 0; i < layer->stacked_directories.count; ++i) {
-		const char *dir_path = layer->stacked_directories.data[i];
+		struct mount_config *mnt = layer->stacked_directories.data[i];
 
-		if (!(new_mount = mount_farm_add_stacked(farm, dir_path, layer)))
+		if (!(new_mount = mount_farm_add_stacked(farm, mnt->path, layer)))
 			return false;
 		fstree_node_set_fstype(new_mount, "overlay", farm);
 	}
 
 	for (i = 0; i < layer->transparent_directories.count; ++i) {
-		const char *dir_path = layer->transparent_directories.data[i];
+		struct mount_config *mnt = layer->transparent_directories.data[i];
 
-		if (!(new_mount = mount_farm_add_transparent(farm, dir_path, layer)))
+		if (!(new_mount = mount_farm_add_transparent(farm, mnt->path, mnt->dtype, layer)))
 			return false;
 		fstree_node_set_fstype(new_mount, "bind", farm);
 	}

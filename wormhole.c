@@ -43,6 +43,7 @@ static bool
 system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *cursor)
 {
 	struct fstree_node *node;
+	int dtype;
 
 	if (!strcmp(cursor->mountpoint, "/"))
 		return true;
@@ -52,12 +53,15 @@ system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *
 		return false;
 	}
 
+	dtype = fsutil_get_dtype(cursor->mountpoint);
+
 	if (strcmp(cursor->fstype, "overlay") || BIND_SYSTEM_OVERLAYS) {
-		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_STACKED, NULL);
+		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_STACKED, dtype, NULL);
 	} else {
-		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_TRANSPARENT, NULL);
+		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_TRANSPARENT, dtype, NULL);
 		if (node && cursor->overlay.dirs->count) {
 			struct wormhole_layer *l;
+			unsigned int j;
 
 			if (cursor->overlay.dirs->count == 0) {
 				log_error("system mount %s is an overlay, but we didn't detect any layers",
@@ -66,7 +70,13 @@ system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *
 			}
 
 			l = wormhole_layer_new("system-layer", NULL, 0);
-			strutil_array_append_array(&l->stacked_directories, cursor->overlay.dirs);
+
+			for (j = 0; j < cursor->overlay.dirs->count; ++j) {
+				const char *overlay_path = cursor->overlay.dirs->data[j];
+
+				mount_config_array_add(&l->stacked_directories, overlay_path, DT_DIR);
+			}
+
 			wormhole_layer_array_append(&node->attached_layers, l);
 		}
 	}
@@ -154,7 +164,7 @@ mount_farm_discover_system_mounts(struct mount_farm *farm)
 		if (node->export_type != WORMHOLE_EXPORT_TRANSPARENT)
 			continue;
 
-		new_mount = mount_farm_add_transparent(farm, node->relative_path, NULL);
+		new_mount = mount_farm_add_transparent(farm, node->relative_path, node->dtype, NULL);
 		if (new_mount == NULL)
 			goto out;
 
@@ -187,13 +197,13 @@ mount_farm_apply_quirks(struct mount_farm *farm)
 
 	/* In some configurations, /dev will not be a devfs but just a regular directory
 	 * with some static files in it. Catch this case. */
-	if (!(node = mount_farm_add_transparent(farm, "/dev", NULL)))
+	if (!(node = mount_farm_add_transparent(farm, "/dev", DT_DIR, NULL)))
 		return false;
 
 	if (node->fstype == NULL)
 		fstree_node_set_fstype(node, "bind", farm);
 
-	if (!(node = mount_farm_add_transparent(farm, "/tmp", NULL)))
+	if (!(node = mount_farm_add_transparent(farm, "/tmp", DT_DIR, NULL)))
 		return false;
 
 	fstree_node_set_fstype(node, "tmpfs", farm);
@@ -873,15 +883,16 @@ record_modified_mounts_to_layer(struct wormhole_context *ctx, struct wormhole_la
 		unsigned int j;
 
 		for (j = 0; j < layer->stacked_directories.count; ++j) {
-			const char *dir_path = layer->stacked_directories.data[j];
+			struct mount_config *mnt = layer->stacked_directories.data[j];
 			const char *image_dir_path;
 
-			image_dir_path = __pathutil_concat2(image_root, dir_path);
+			image_dir_path = __pathutil_concat2(image_root, mnt->path);
 			if (fsutil_exists(image_dir_path)) {
-				if (!strutil_array_contains(&new_layer->stacked_directories, dir_path)) {
-					trace("  %s: add to stacked mounts", dir_path);
-					strutil_array_append(&new_layer->stacked_directories, dir_path);
+				if (!mount_config_array_append(&new_layer->stacked_directories, mnt)) {
+					log_error("Cannot add %s to layer's stacked mounts", mnt->path);
+					return false;
 				}
+				trace("  %s: add to stacked mounts", mnt->path);
 			}
 		}
 	}

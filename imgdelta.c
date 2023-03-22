@@ -542,21 +542,35 @@ update_image_work(struct imgdelta_config *cfg, const char *tpath)
 
 	trace("=== Building image delta between system and %s ===", overlay);
 	for (i = 0; i < cfg->stacked_mounts.count; ++i) {
-		const char *dir_path = cfg->stacked_mounts.data[i];
+		struct mount_config *mnt = cfg->stacked_mounts.data[i];
 
-		rv = update_image_partial(cfg, overlay, dir_path);
+		rv = update_image_partial(cfg, overlay, mnt->path);
 		if (rv != 0)
 			return rv;
 	}
 
 	if (cfg->transparent_mounts.count) {
-		trace("=== Creating empty directories ===");
+		trace("=== Creating hooks for transparent mount points ===");
 
 		for (i = 0; i < cfg->transparent_mounts.count; ++i) {
-			const char *dir_path = cfg->transparent_mounts.data[i];
+			struct mount_config *mnt = cfg->transparent_mounts.data[i];
+			const char *dir_path = mnt->path;
+			const char *image_path;
 
-			if (!fsutil_makedirs(__pathutil_concat2(overlay, dir_path), 0755))
-				rv = 1;
+			if (mnt->dtype == DT_UNKNOWN) {
+				trace("%s default to directory", dir_path);
+				mnt->dtype = DT_DIR;
+			}
+
+			image_path = __pathutil_concat2(overlay, dir_path);
+
+			if (mnt->dtype == DT_DIR) {
+				if (!fsutil_makedirs(image_path, 0755))
+					rv = 1;
+			} else {
+				if (!fsutil_makefile(image_path, 0644))
+					rv = 1;
+			}
 		}
 
 		if (rv)
@@ -617,14 +631,15 @@ create_mount_farm_for_layer(struct wormhole_layer *layer, struct imgdelta_config
 	farm = mount_farm_new(layer->image_path);
 
 	for (i = 0; i < cfg->transparent_mounts.count; ++i) {
-		const char *dir_path = cfg->transparent_mounts.data[i];
+		struct mount_config *mnt = cfg->transparent_mounts.data[i];
 
-		if (!mount_farm_add_transparent(farm, dir_path, layer))
+		if (!mount_farm_add_transparent(farm, mnt->path, mnt->dtype, layer))
 			goto failed;
 	}
 
 	for (i = 0; i < cfg->stacked_mounts.count; ++i) {
-		const char *dir_path = cfg->stacked_mounts.data[i];
+		struct mount_config *mnt = cfg->stacked_mounts.data[i];
+		const char *dir_path = mnt->path;
 
 		/* For non-root layers, only include directories if they're non-empty */
 		/* FIXME: it would be better to move this check to a later stage. If we
@@ -735,6 +750,16 @@ config_add_entry_symlink(struct imgdelta_config *cfg, const char *entry_point_na
 	strutil_mapping_add(&cfg->entry_point_symlinks, entry_point_name, symlink_path);
 }
 
+static inline bool
+check_absolute_path(const char *filename, unsigned int lineno, const char *kwd, const char *value)
+{
+	if (value[0] != '/') {
+		log_error("%s:%u: argument to %s must be an absolute path", filename, lineno, kwd);
+		return false;
+	}
+	return true;
+}
+
 static bool
 read_config(struct imgdelta_config *cfg, const char *filename)
 {
@@ -758,40 +783,38 @@ read_config(struct imgdelta_config *cfg, const char *filename)
 		if (buffer[0] == '#' || !(kwd = strtok(buffer, " \t")))
 			continue;
 
-		if (!(value = strtok(NULL, "")))
+		if (!(value = strtok(NULL, " \t")))
 			value = "";
 		else
 			value = __strutil_trim(value);
 
 		if (!strcmp(kwd, "copy") || !strcmp(kwd, "stacked-mount")) {
-			if (value[0] != '/') {
-				log_error("%s:%u: argument to %s must be an absolute path", filename, lineno, kwd);
+			if (!check_absolute_path(filename, lineno, kwd, value))
 				goto done;
-			}
 
-			strutil_array_append(&cfg->stacked_mounts, value);
+			mount_config_array_add(&cfg->stacked_mounts, value, DT_DIR);
 		} else
 		if (!strcmp(kwd, "exclude")) {
-			if (value[0] != '/') {
-				log_error("%s:%u: argument to %s must be an absolute path", filename, lineno, kwd);
+			if (!check_absolute_path(filename, lineno, kwd, value))
 				goto done;
-			}
 
 			strutil_array_append(&cfg->excldirs, value);
 		} else
 		if (!strcmp(kwd, "makedir") || !strcmp(kwd, "transparent-mount")) {
-			if (value[0] != '/') {
-				log_error("%s:%u: argument to %s must be an absolute path", filename, lineno, kwd);
+			if (!check_absolute_path(filename, lineno, kwd, value))
 				goto done;
-			}
 
-			strutil_array_append(&cfg->transparent_mounts, value);
+			mount_config_array_add(&cfg->transparent_mounts, value, DT_DIR);
+		} else
+		if (!strcmp(kwd, "transparent-file-mount")) {
+			if (!check_absolute_path(filename, lineno, kwd, value))
+				goto done;
+
+			mount_config_array_add(&cfg->transparent_mounts, value, DT_REG);
 		} else
 		if (!strcmp(kwd, "entry-point")) {
-			if (value[0] != '/') {
-				log_error("%s:%u: argument to %s must be an absolute path", filename, lineno, kwd);
+			if (!check_absolute_path(filename, lineno, kwd, value))
 				goto done;
-			}
 
 			strutil_array_append(&cfg->entry_points, value);
 		} else
@@ -812,6 +835,11 @@ read_config(struct imgdelta_config *cfg, const char *filename)
 				goto done;
 		} else {
 			log_error("%s:%u: unknown keyword \"%s\"", filename, lineno, kwd);
+			goto done;
+		}
+
+		if ((value = strtok(NULL, "")) != NULL) {
+			log_error("%s:%u: too many arguments to \"%s\"", filename, lineno, kwd);
 			goto done;
 		}
 	}
@@ -846,7 +874,7 @@ main(int argc, char **argv)
 			break;
 
 		case 'C':
-			strutil_array_append(&config.stacked_mounts, optarg);
+			(void) mount_config_array_add(&config.stacked_mounts, optarg, DT_DIR);
 			break;
 
 		case 'L':
@@ -898,7 +926,7 @@ main(int argc, char **argv)
 		const char **dirs = default_copydirs, *path;
 
 		for (dirs = default_copydirs; (path = *dirs++) != NULL; )
-			strutil_array_append(&config.stacked_mounts, path);
+			mount_config_array_add(&config.stacked_mounts, path, DT_DIR);
 	}
 
 	if (tracing_level > 0) {
@@ -913,9 +941,13 @@ main(int argc, char **argv)
 		else
 			for (i = 0; i < config.layers_used.count; ++i)
 				trace("  %s", config.layers_used.data[i]);
+
 		trace("Dirs to copy");
-		for (i = 0; i < config.stacked_mounts.count; ++i)
-			trace("  %s", config.stacked_mounts.data[i]);
+		for (i = 0; i < config.stacked_mounts.count; ++i) {
+			struct mount_config *mnt = config.stacked_mounts.data[i];
+			trace("  %u %s", mnt->dtype, mnt->path);
+		}
+
 		if (config.excldirs.count)
 			trace("Excluded");
 		for (i = 0; i < config.excldirs.count; ++i)

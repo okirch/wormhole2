@@ -22,6 +22,7 @@
 #ifndef IMGDELTA_H
 #define IMGDELTA_H
 
+#include "wormhole2.h"
 #include "util.h"
 
 struct imgdelta_config {
@@ -37,10 +38,10 @@ struct imgdelta_config {
 	struct strutil_array	layers_used;
 	struct strutil_array	layer_images;
 
-	struct strutil_array	stacked_mounts;
+	struct mount_config_array stacked_mounts;
 	struct strutil_array	excldirs;
 
-	struct strutil_array	transparent_mounts;
+	struct mount_config_array transparent_mounts;
 
 	struct strutil_array	entry_points;
 	strutil_mapping_t	entry_point_symlinks;
