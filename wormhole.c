@@ -1093,6 +1093,7 @@ static struct option	long_options[] = {
 	{ "buildroot",	required_argument,	NULL,	'R'		},
 	{ "use",	required_argument,	NULL,	'u'		},
 	{ "layer",	required_argument,	NULL,	'L'		},
+	{ "force",	no_argument,		NULL,	'f'		},
 	{ "rpmdb",	no_argument,		NULL,	OPT_RPMDB	},
 	{ "run-as-root",no_argument,		NULL,	OPT_RUNAS_ROOT	},
 	{ "run-as-user",no_argument,		NULL,	OPT_RUNAS_USER	},
@@ -1115,7 +1116,7 @@ main(int argc, char **argv)
 
 	ctx = wormhole_context_new();
 
-	while ((c = getopt_long(argc, argv, "B:dL:R:u:", long_options, NULL)) != EOF) {
+	while ((c = getopt_long(argc, argv, "B:dfL:R:u:", long_options, NULL)) != EOF) {
 		switch (c) {
 		case 'B':
 		case OPT_BUILD_USER_LAYER:
@@ -1132,6 +1133,10 @@ main(int argc, char **argv)
 
 		case 'd':
 			tracing_increment_level();
+			break;
+
+		case 'f':
+			ctx->force = true;
 			break;
 
 		case 'R':
