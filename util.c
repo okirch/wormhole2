@@ -1215,6 +1215,18 @@ fsutil_ftw_descend(struct fsutil_ftw_ctx *ctx, const struct dirent *d)
 		}
 	}
 
+	if (ctx->exclude.count) {
+		struct stat stb;
+
+		if (lstat(child->path, &stb) < 0) {
+			log_error("funny, %s disappeared", child->path);
+			goto skipped;
+		}
+
+		if (dev_ino_array_contains(&ctx->exclude, stb.st_dev, stb.st_ino))
+			goto skipped;
+	}
+
 	childfd = openat(parent->dir_fd, name, O_RDONLY|O_NOCTTY|O_NONBLOCK|O_NOFOLLOW|O_DIRECTORY);
 	if (childfd < 0 && errno == EACCES && (ctx->flags & FSUTIL_FTW_OVERRIDE_OPEN_ERROR)) {
 		(void) fchmodat(parent->dir_fd, name, 0700, 0);
@@ -1323,8 +1335,8 @@ fsutil_ftw_skip(struct fsutil_ftw_ctx *ctx, const struct fsutil_ftw_cursor *curs
 {
 	struct fsutil_ftw_level *dir = ctx->current;
 
-	if (!strcmp(cursor->path, dir->path))
-		fsutil_ftw_return(ctx);
+	if (dir && !strcmp(cursor->path, dir->path))
+		return fsutil_ftw_return(ctx);
 	return false;
 }
 
@@ -1337,13 +1349,19 @@ fsutil_ftw_next(struct fsutil_ftw_ctx *ctx, struct fsutil_ftw_cursor *cursor)
 	if (cursor)
 		cursor->d = NULL;
 
+	//trace4("%s(%s/%s)", __func__, ctx->top_dir, ctx->current? ctx->current->path: "<none>");
 	while (rv == FTW_CONTINUE || rv == FTW_SKIP) {
 		struct fsutil_ftw_level *dir = ctx->current;
+
+		if (dir == NULL)
+			break;
 
 		if ((d = __fsutil_ftw_next(dir)) == NULL) {
 			if (ctx->callback_after && dir->saved_dirent) {
 				d = dir->saved_dirent;
 				dir->saved_dirent = NULL;
+
+				/* FIXME: shouldn't we actually return the dentry here? */
 			}
 
 			if (!fsutil_ftw_return(ctx))
@@ -1384,7 +1402,10 @@ fsutil_ftw_next(struct fsutil_ftw_ctx *ctx, struct fsutil_ftw_cursor *cursor)
 
 					if (dev_ino_array_contains(&ctx->exclude, cursor->_st.st_dev, cursor->_st.st_ino)) {
 						trace2("%s: skipped", cursor->path);
-						fsutil_ftw_skip(ctx, cursor);
+#if 0
+						if (!fsutil_ftw_skip(ctx, cursor))
+							log_warning("tried to skip %s but failed", cursor->path);
+#endif
 						continue;
 					}
 				}
