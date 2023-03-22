@@ -395,6 +395,12 @@ fstree_node_mount(const struct fstree_node *node)
 				bind_source = __pathutil_concat2(node->bind_mount_override_layer->image_path, bind_source);
 
 			trace("Bind mounting %s on %s\n", bind_source, node->relative_path);
+			if (!fsutil_isdir(bind_source)
+			 && fsutil_isdir(node->mountpoint)) {
+				trace("  Need to change %s from dir to file", node->mountpoint);
+				rmdir(node->mountpoint);
+				fsutil_makefile(node->mountpoint, 0644);
+			}
 			return fsutil_mount_bind(bind_source, node->mountpoint, true);
 		}
 
