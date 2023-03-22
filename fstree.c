@@ -346,7 +346,7 @@ fstree_node_build_lowerspec(const struct fstree_node *node)
 	char *result;
 
 	trace3("%s(%s): %u layers", __func__, node->relative_path, layers->count);
-	for (n = 0; n < layers->count; ++n) {
+	for (n = layers->count; n--; ) {
 		struct wormhole_layer *layer = layers->data[n];
 
 		strutil_array_append(&dirs, __pathutil_concat2(layer->image_path, node->relative_path));
