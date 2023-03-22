@@ -70,7 +70,7 @@ detect_changes(const char *patha, const struct stat *sta, const char *pathb, con
 	unsigned long mode_xor;
 	int bits_changed = 0;
 
-	mode_xor = sta->st_mode ^ stb->st_mode;
+	mode_xor = (sta->st_mode ^ stb->st_mode) & ~(S_ISUID | S_ISGID);
 	if (mode_xor & S_IFMT) {
 		trace3("%s: file type changed", patha);
 		return ~0; /* type changed, update everything */
@@ -152,10 +152,15 @@ __image_update_attrs(const char *image_path, const struct stat *stb)
 	}
 
 	/* As of this writing, fchmodat does not support AT_SYMLINK_NOFOLLOW.
-	 * Hence we only make an attempt to change the mode for files other than symlinks */
+	 * Hence we only make an attempt to change the mode for files other than symlinks.
+	 * Note: we copy permission bits and the sticky but, but not suid/sgid. One, these
+	 * bits are ignored in user namespaces, anyway. Two, OBS will complain loudly if
+	 * we package an image that has suid binaries in unexpected places. */
 	if (!S_ISLNK(stb->st_mode)) {
-		if (fchmodat(dirfd, base_name, stb->st_mode & 0777, 0) < 0)
-			log_warning("%s: cannot set mode 0%03o: %m", image_path, stb->st_mode & 0777);
+		mode_t mode = stb->st_mode & 01777;
+
+		if (fchmodat(dirfd, base_name, mode, 0) < 0)
+			log_warning("%s: cannot set mode 0%03o: %m", image_path, mode);
 	}
 
 	if (1) {
