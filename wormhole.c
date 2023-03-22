@@ -622,6 +622,8 @@ wormhole_context_perform_in_container(struct wormhole_context *ctx, int (*fn)(st
 	}
 
 	if (status == PROCUTIL_CHILD) {
+		/* In case people run bash */
+		setenv("PS1", "wormhole> ", true);
 		trace("%s: executing subprocess callback %p", __func__, fn);
 		exit_status = fn(ctx);
 		trace("%s: subprocess going to terminate normally, exit status = %d", __func__, exit_status);
