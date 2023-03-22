@@ -377,8 +377,10 @@ fstree_node_mount(const struct fstree_node *node)
 		return true;
 	}
 
+#if 0
 	if (node->upper && chown(node->upper, 0, 0))
 		log_warning("Unable to chown %s: %m", node->upper);
+#endif
 
 	if (node->parent && node->parent->export_type == WORMHOLE_EXPORT_ROOT)
 		(void) fsutil_makedirs(node->mountpoint, 0755);
