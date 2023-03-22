@@ -599,10 +599,12 @@ wormhole_context_switch_root(struct wormhole_context *ctx)
 		}
 	}
 
-	if (setgid(0) < 0)
-		log_fatal("Failed to setgid(0): %m\n");
-	if (setuid(0) < 0)
-		log_fatal("Failed to setuid(0): %m\n");
+	if (ctx->map_caller_to_root) {
+		if (setgid(0) < 0)
+			log_fatal("Failed to setgid(0): %m\n");
+		if (setuid(0) < 0)
+			log_fatal("Failed to setuid(0): %m\n");
+	}
 
 	return true;
 }
