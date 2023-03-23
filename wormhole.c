@@ -1212,6 +1212,8 @@ main(int argc, char **argv)
 		ctx->running_inside_chroot = true;
 	}
 
+	wormhole_layer_set_default_search_path();
+
 	switch (ctx->purpose) {
 	case PURPOSE_BUILD:
 		do_build(ctx);

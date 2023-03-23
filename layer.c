@@ -29,8 +29,78 @@
 #include "tracing.h"
 #include "util.h"
 
-static char *	wormhole_layer_make_user_path(const char *name);
+static struct strutil_array	layer_search_path;
+static const char *		layer_type_names[__BUILD_LAYER_MAX] = {
+	[BUILD_USER_LAYER]	= "user",
+	[BUILD_SITE_LAYER]	= "site",
+	[BUILD_SYSTEM_LAYER]	= "system",
+};
 
+static struct {
+	char *			path[__BUILD_LAYER_MAX];
+} layer_defaults;
+
+/*
+ * Configure the search path for wormhole layers
+ */
+void
+wormhole_layer_add_search_path(int layer_type, const char *path)
+{
+	char **var = NULL;
+	char *expanded_path;
+
+	expanded_path = pathutil_expand(path, false);
+
+	if (layer_type == BUILD_USER_LAYER || fsutil_isdir(expanded_path)) {
+		if (0 <= layer_type && layer_type < __BUILD_LAYER_MAX)
+			var = &layer_defaults.path[layer_type];
+		if (var && *var == NULL)
+			strutil_set(var, expanded_path);
+
+		strutil_array_append(&layer_search_path, expanded_path);
+	}
+
+	strutil_drop(&expanded_path);
+}
+
+void
+wormhole_layer_set_default_search_path(void)
+{
+	if (layer_search_path.count)
+		return;
+
+	wormhole_layer_add_search_path(BUILD_USER_LAYER, WORMHOLE_USER_LAYER_BASE_PATH);
+	wormhole_layer_add_search_path(BUILD_SITE_LAYER, WORMHOLE_SITE_LAYER_BASE_PATH);
+	wormhole_layer_add_search_path(BUILD_SYSTEM_LAYER, WORMHOLE_LAYER_BASE_PATH);
+}
+
+void
+wormhole_layer_print_default_search_path(void)
+{
+	unsigned int i, j;
+
+	trace("Search path:");
+	for (i = 0; i < layer_search_path.count; ++i) {
+		const char *layer_base = layer_search_path.data[i];
+		const char *type = NULL;
+
+		for (j = 0; j < __BUILD_LAYER_MAX; ++j) {
+			const char *def_base = layer_defaults.path[j];
+
+			if (def_base && !strcmp(def_base, layer_base))
+				type = layer_type_names[j];
+		}
+
+		if (type)
+			trace("  %s [%s]", layer_base, type);
+		else
+			trace("  %s", layer_search_path.data[i]);
+	}
+}
+
+/*
+ * Create a new layer object. Try to locate the layer image and config.
+ */
 struct wormhole_layer *
 wormhole_layer_new(const char *name, const char *path, unsigned int depth)
 {
@@ -44,15 +114,31 @@ wormhole_layer_new(const char *name, const char *path, unsigned int depth)
 	if (path) {
 		strutil_set(&layer->path, path);
 	} else {
-		char *user_path = wormhole_layer_make_user_path(name);
+		unsigned int i;
 
-		/* FIXME: more consistency checks? */
-		if (user_path && fsutil_isdir(user_path))
-			strutil_set(&layer->path, user_path);
-		else
-			pathutil_concat2(&layer->path, WORMHOLE_LAYER_BASE_PATH, name);
+		/* In case the caller missed it */
+		wormhole_layer_set_default_search_path();
 
-		strutil_drop(&user_path);
+		for (i = 0; i < layer_search_path.count; ++i) {
+			char *layer_path = NULL;
+
+			pathutil_concat2(&layer_path, layer_search_path.data[i], name);
+
+			/* FIXME: In addition to checking whether the directory exists, we should
+			 * probably also check for the existence of a layer.conf file */
+			if (fsutil_isdir(layer_path)) {
+				layer->path = layer_path;
+				break;
+			}
+
+			strutil_drop(&layer_path);
+		}
+
+		if (layer->path == NULL) {
+			log_error("Cannot find a definition for layer \"%s\"", name);
+			wormhole_layer_release(layer);
+			return NULL;
+		}
 	}
 
 	pathutil_concat2(&layer->config_path, layer->path, "layer.conf");
@@ -521,30 +607,24 @@ wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm 
 }
 
 /*
- * Given a layer name, build the path name to the user-private layer directory
+ * Return the layer path for a given layer name and type.
  */
-static char *
-wormhole_layer_make_user_path(const char *name)
-{
-	char pathbuf[PATH_MAX];
-
-	snprintf(pathbuf, sizeof(pathbuf), "%s/%s", WORMHOLE_USER_LAYER_BASE_PATH, name);
-	return pathutil_expand(pathbuf, false);
-}
-
-static char *
-wormhole_layer_make_system_path(const char *name)
-{
-	char *result = NULL;
-
-	pathutil_concat2(&result, WORMHOLE_LAYER_BASE_PATH, name);
-	return result;
-}
-
 char *
 wormhole_layer_make_path(const char *target_name, int target_type)
 {
-	if (target_type == BUILD_USER_LAYER)
-		return wormhole_layer_make_user_path(target_name);
-	return wormhole_layer_make_system_path(target_name);
+	const char *base_path;
+	char *result = NULL;
+
+	if (target_type < 0 || __BUILD_LAYER_MAX <= target_type)
+		return NULL;
+
+	/* In case the caller missed it */
+	wormhole_layer_set_default_search_path();
+
+	base_path = layer_defaults.path[target_type];
+	if (base_path == NULL)
+		return NULL;
+
+	pathutil_concat2(&result, base_path, target_name);
+	return result;
 }
