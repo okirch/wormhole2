@@ -414,6 +414,11 @@ wormhole_context_set_build(struct wormhole_context *ctx, const char *name, int t
 static void
 wormhole_context_set_build_defaults(struct wormhole_context *ctx)
 {
+	/* In order for unprivileged user builds to work properly, we need to "copy up" at least
+	 * all the directory inodes, so that they have the correct owner. */
+	if (!ctx->force && ctx->build_target_type == BUILD_USER_LAYER && getuid() != 0)
+		log_fatal("User builds for users other than root not yet implemented.");
+
 	/* Set the default build root */
 	if (ctx->build_root == NULL) {
 		ctx->build_root = wormhole_layer_make_path(ctx->build_target, ctx->build_target_type);
