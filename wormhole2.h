@@ -114,11 +114,11 @@ enum {
 };
 
 enum {
-	BUILD_USER_LAYER = 0,
-	BUILD_SITE_LAYER,
-	BUILD_SYSTEM_LAYER,
+	LAYER_TYPE_USER = 0,
+	LAYER_TYPE_SITE,
+	LAYER_TYPE_SYSTEM,
 
-	__BUILD_LAYER_MAX
+	__LAYER_TYPE_MAX
 };
 
 struct wormhole_context {

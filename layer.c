@@ -30,14 +30,14 @@
 #include "util.h"
 
 static struct strutil_array	layer_search_path;
-static const char *		layer_type_names[__BUILD_LAYER_MAX] = {
-	[BUILD_USER_LAYER]	= "user",
-	[BUILD_SITE_LAYER]	= "site",
-	[BUILD_SYSTEM_LAYER]	= "system",
+static const char *		layer_type_names[__LAYER_TYPE_MAX] = {
+	[LAYER_TYPE_USER]	= "user",
+	[LAYER_TYPE_SITE]	= "site",
+	[LAYER_TYPE_SYSTEM]	= "system",
 };
 
 static struct {
-	char *			path[__BUILD_LAYER_MAX];
+	char *			path[__LAYER_TYPE_MAX];
 } layer_defaults;
 
 /*
@@ -51,8 +51,8 @@ wormhole_layer_add_search_path(int layer_type, const char *path)
 
 	expanded_path = pathutil_expand(path, false);
 
-	if (layer_type == BUILD_USER_LAYER || fsutil_isdir(expanded_path)) {
-		if (0 <= layer_type && layer_type < __BUILD_LAYER_MAX)
+	if (layer_type == LAYER_TYPE_USER || fsutil_isdir(expanded_path)) {
+		if (0 <= layer_type && layer_type < __LAYER_TYPE_MAX)
 			var = &layer_defaults.path[layer_type];
 		if (var && *var == NULL)
 			strutil_set(var, expanded_path);
@@ -69,9 +69,9 @@ wormhole_layer_set_default_search_path(void)
 	if (layer_search_path.count)
 		return;
 
-	wormhole_layer_add_search_path(BUILD_USER_LAYER, WORMHOLE_USER_LAYER_BASE_PATH);
-	wormhole_layer_add_search_path(BUILD_SITE_LAYER, WORMHOLE_SITE_LAYER_BASE_PATH);
-	wormhole_layer_add_search_path(BUILD_SYSTEM_LAYER, WORMHOLE_LAYER_BASE_PATH);
+	wormhole_layer_add_search_path(LAYER_TYPE_USER, WORMHOLE_USER_LAYER_BASE_PATH);
+	wormhole_layer_add_search_path(LAYER_TYPE_SITE, WORMHOLE_SITE_LAYER_BASE_PATH);
+	wormhole_layer_add_search_path(LAYER_TYPE_SYSTEM, WORMHOLE_LAYER_BASE_PATH);
 }
 
 void
@@ -84,7 +84,7 @@ wormhole_layer_print_default_search_path(void)
 		const char *layer_base = layer_search_path.data[i];
 		const char *type = NULL;
 
-		for (j = 0; j < __BUILD_LAYER_MAX; ++j) {
+		for (j = 0; j < __LAYER_TYPE_MAX; ++j) {
 			const char *def_base = layer_defaults.path[j];
 
 			if (def_base && !strcmp(def_base, layer_base))
@@ -615,7 +615,7 @@ wormhole_layer_make_path(const char *target_name, int target_type)
 	const char *base_path;
 	char *result = NULL;
 
-	if (target_type < 0 || __BUILD_LAYER_MAX <= target_type)
+	if (target_type < 0 || __LAYER_TYPE_MAX <= target_type)
 		return NULL;
 
 	/* In case the caller missed it */

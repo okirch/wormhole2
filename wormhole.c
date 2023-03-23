@@ -416,7 +416,7 @@ wormhole_context_set_build_defaults(struct wormhole_context *ctx)
 {
 	/* In order for unprivileged user builds to work properly, we need to "copy up" at least
 	 * all the directory inodes, so that they have the correct owner. */
-	if (!ctx->force && ctx->build_target_type == BUILD_USER_LAYER && getuid() != 0)
+	if (!ctx->force && ctx->build_target_type == LAYER_TYPE_USER && getuid() != 0)
 		log_fatal("User builds for users other than root not yet implemented.");
 
 	/* Set the default build root */
@@ -442,7 +442,7 @@ wormhole_context_set_build_defaults(struct wormhole_context *ctx)
 					ctx->build_target, ctx->build_root);
 	}
 
-	if (ctx->build_bindir == NULL && ctx->build_target_type == BUILD_USER_LAYER) {
+	if (ctx->build_bindir == NULL && ctx->build_target_type == LAYER_TYPE_USER) {
 		char *bindir = pathutil_expand(WORMHOLE_USER_BIN_DIR, true);
 
 		if (bindir == NULL) {
@@ -1030,7 +1030,7 @@ do_build(struct wormhole_context *ctx)
 	if (ctx->auto_entry_points) {
 		discover_entry_points(layer);
 
-		if (ctx->build_target_type == BUILD_USER_LAYER)
+		if (ctx->build_target_type == LAYER_TYPE_USER)
 			wormhole_layer_create_default_wrapper_symlinks(layer);
 	}
 
@@ -1146,15 +1146,15 @@ main(int argc, char **argv)
 		switch (c) {
 		case 'B':
 		case OPT_BUILD_USER_LAYER:
-			wormhole_context_set_build(ctx, optarg, BUILD_USER_LAYER);
+			wormhole_context_set_build(ctx, optarg, LAYER_TYPE_USER);
 			break;
 
 		case OPT_BUILD_SITE_LAYER:
-			wormhole_context_set_build(ctx, optarg, BUILD_SITE_LAYER);
+			wormhole_context_set_build(ctx, optarg, LAYER_TYPE_SITE);
 			break;
 
 		case OPT_BUILD_SYSTEM_LAYER:
-			wormhole_context_set_build(ctx, optarg, BUILD_SYSTEM_LAYER);
+			wormhole_context_set_build(ctx, optarg, LAYER_TYPE_SYSTEM);
 			break;
 
 		case OPT_BOOT:
