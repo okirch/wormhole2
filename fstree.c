@@ -412,7 +412,7 @@ fstree_node_mount(const struct fstree_node *node)
 		return true;
 	}
 
-	if (node->dtype >= 0 && node->dtype != DT_REG && node->dtype != DT_LNK)
+	if (node->dtype >= 0 && node->dtype != DT_DIR && node->dtype != DT_REG && node->dtype != DT_LNK)
 		log_warning("%s is not a regular file; building an overlay will probably fail", node->relative_path);
 
 	if (!(lowerspec = fstree_node_build_lowerspec(node)))
