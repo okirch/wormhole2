@@ -863,6 +863,30 @@ __fsutil_get_dtype(const struct stat *st)
         return DT_UNKNOWN;
 }
 
+const char *
+fsutil_dtype_as_string(int dtype)
+{
+        switch (dtype) {
+        case DT_REG:
+                return "regular file";
+        case DT_DIR:
+                return "directory";
+        case DT_LNK:
+                return "symbolic link";
+        case DT_CHR:
+                return "character device";
+        case DT_BLK:
+                return "block device";
+        case DT_SOCK:
+                return "socket";
+        case DT_FIFO:
+                return "FIFO";
+        default:
+                break;
+	}
+        return "unknown fs object";
+}
+
 int
 fsutil_get_dtype(const char *path)
 {

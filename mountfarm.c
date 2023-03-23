@@ -278,7 +278,7 @@ mount_farm_has_mount_for(struct mount_farm *farm, const char *path)
 static bool
 __mount_farm_fudge_non_directory(struct fstree_node *node, struct fstree_node *closest_ancestor, int dtype, struct wormhole_layer *layer)
 {
-	trace("%s is not a directory - dt %u", node->relative_path, dtype);
+	trace("%s is not a directory but a %s", node->relative_path, fsutil_dtype_as_string(dtype));
 	node->dtype = dtype;
 
 	if (closest_ancestor->export_type == WORMHOLE_EXPORT_TRANSPARENT) {
