@@ -1091,6 +1091,7 @@ enum {
 	OPT_NO_AUTO_ENTRY_POINTS,
 	OPT_INSTALL_BINDIR,
 	OPT_RPMDB,
+	OPT_LOGFILE,
 };
 
 static struct option	long_options[] = {
@@ -1114,6 +1115,7 @@ static struct option	long_options[] = {
 			no_argument,		NULL,	OPT_NO_AUTO_ENTRY_POINTS },
 	{ "install-bindir",
 			required_argument,	NULL,	OPT_INSTALL_BINDIR },
+	{ "logfile",	required_argument,	NULL,	OPT_LOGFILE	},
 
 	{ NULL },
 };
@@ -1181,6 +1183,10 @@ main(int argc, char **argv)
 
 		case OPT_INSTALL_BINDIR:
 			strutil_set(&ctx->build_bindir, optarg);
+			break;
+
+		case OPT_LOGFILE:
+			set_logfile(optarg);
 			break;
 
 		default:
