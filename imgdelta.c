@@ -452,6 +452,14 @@ update_image_partial(struct imgdelta_config *cfg, const char *image_root, const 
 			ok = image_copy(image_root, &system_cursor) && ok;
 			system_cursor.d = NULL;
 		} else {
+			/* FIXME: imgdelta.conf may contain transparent mounts (like
+			 * /etc/ssl or /etc/resolv.conf) which may be absent from our
+			 * system tree. In this case, we would accidentally remove these
+			 * files or directories, resulting in whiteout entries in the
+			 * delta image.
+			 * For now we deal with this by cleaning out these spurious whiteouts
+			 * before copying the result, but it's not ideal.
+			 */
 			trace("%s: removed from system", image_cursor.relative_path);
 			ok = image_remove(image_root, &image_cursor) && ok;
 			fsutil_ftw_skip(image_ctx, &image_cursor);
@@ -481,6 +489,32 @@ done:
 failed:
 	/* FIXME: cleanup */
 	return 1;
+}
+
+static bool
+remove_spurious_whiteouts(const char *image_base, struct mount_config_array *transparent_mounts)
+{
+	struct fsutil_ftw_ctx *ctx;
+	struct fsutil_ftw_cursor cursor;
+	bool ok = true;
+
+	if (!(ctx = fsutil_ftw_open("/", FSUTIL_FTW_NEED_STAT, image_base)))
+		return false;
+
+	while (fsutil_ftw_next(ctx, &cursor)) {
+		if (__fsutil_is_whiteout(cursor.st)) {
+			struct mount_config *entry;
+
+			entry = mount_config_array_get(transparent_mounts, cursor.relative_path);
+			if (entry != NULL) {
+				trace("%s is a whiteout entry for a transparent mount point", entry->path);
+				unlink(cursor.path);
+			}
+		}
+	}
+
+	fsutil_ftw_ctx_free(ctx);
+	return ok;
 }
 
 static int
@@ -548,6 +582,10 @@ update_image_work(struct imgdelta_config *cfg, const char *tpath)
 		if (rv != 0)
 			return rv;
 	}
+
+	trace("=== Removing spurious whiteouts from image delta ===");
+	if (!remove_spurious_whiteouts(upperdir, &cfg->transparent_mounts))
+		return 1;
 
 	if (cfg->transparent_mounts.count) {
 		trace("=== Creating hooks for transparent mount points ===");
