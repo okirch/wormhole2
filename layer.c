@@ -301,6 +301,10 @@ wormhole_layer_load_config(struct wormhole_layer *layer)
 			okay = __parse_mount(&layer->mounts, kwd, value, DT_DIR,
 					MOUNT_ORIGIN_SYSTEM, MOUNT_MODE_BIND);
 		} else
+		if (!strcmp(kwd, "semitransparent-mount")) {
+			okay = __parse_mount(&layer->mounts, kwd, value, DT_DIR,
+					MOUNT_ORIGIN_SYSTEM, MOUNT_MODE_OVERLAY);
+		} else
 		if (!strcmp(kwd, "transparent-file-mount")) {
 			okay = __parse_mount(&layer->mounts, kwd, value, DT_REG,
 					MOUNT_ORIGIN_SYSTEM, MOUNT_MODE_BIND);
@@ -341,6 +345,10 @@ wormhole_layer_save_config(struct wormhole_layer *layer)
 		if (mnt->origin == MOUNT_ORIGIN_LAYER && mnt->mode == MOUNT_MODE_OVERLAY) {
 			if (mnt->dtype == DT_DIR)
 				kwd = "stacked-mount";
+		} else
+		if (mnt->origin == MOUNT_ORIGIN_SYSTEM && mnt->mode == MOUNT_MODE_OVERLAY) {
+			if (mnt->dtype == DT_DIR)
+				kwd = "semitransparent-mount";
 		} else
 		if (mnt->origin == MOUNT_ORIGIN_SYSTEM && mnt->mode == MOUNT_MODE_BIND) {
 			if (mnt->dtype == DT_DIR)
@@ -632,4 +640,25 @@ wormhole_layer_make_path(const char *target_name, int target_type)
 
 	pathutil_concat2(&result, base_path, target_name);
 	return result;
+}
+
+/*
+ * For semi-transparent mounts we need a "layer" that represents the
+ * system.
+ */
+struct wormhole_layer *
+wormhole_layer_get_system(void)
+{
+	static struct wormhole_layer *_system = NULL;
+
+	if (_system == NULL) {
+		_system = calloc(1, sizeof(*_system));
+		_system->refcount = 1;
+		_system->name = strdup("<system>");
+		_system->depth = 0;
+
+		_system->image_path = "/";
+	}
+
+	return _system;
 }

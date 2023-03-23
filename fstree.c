@@ -469,6 +469,8 @@ mount_export_type_as_string(int export_type)
 		return "stacked";
 	case WORMHOLE_EXPORT_TRANSPARENT:
 		return "transparent";
+	case WORMHOLE_EXPORT_SEMITRANSPARENT:
+		return "semitransparent";
 	case WORMHOLE_EXPORT_ERROR:
 		return "error";
 	}

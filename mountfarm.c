@@ -384,13 +384,16 @@ __mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_anc
 		break;
 
 	case EXPORT_COMBINATION(TRANSPARENT, TRANSPARENT):
-		/* We're adding a transparent mount inside a transparent
+	case EXPORT_COMBINATION(TRANSPARENT, STACKED):
+	case EXPORT_COMBINATION(TRANSPARENT, SEMITRANSPARENT):
+		/* We're adding a mount inside some transparent
 		 * mount. All we can do is hope that someone created the
 		 * mount point for us.
 		 */
 		break;
 
 	case EXPORT_COMBINATION(STACKED, TRANSPARENT):
+	case EXPORT_COMBINATION(STACKED, SEMITRANSPARENT):
 		/* FIXME: verify that any of the layers mounted on this
 		 * stacked mount point (aka overlay) provides
 		 * the required mount point.
@@ -400,10 +403,6 @@ __mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_anc
 
 	case EXPORT_COMBINATION(ROOT, STACKED):
 		/* Stacked mount directly below the root */
-		break;
-
-	case EXPORT_COMBINATION(TRANSPARENT, STACKED):
-		/* We're adding a stacked mount inside a transparent mount. */
 		break;
 
 	case EXPORT_COMBINATION(STACKED, STACKED):
@@ -511,6 +510,14 @@ mount_farm_add_mount(struct mount_farm *farm, const struct mount_config *mnt, st
 	else
 	if (mnt->origin == MOUNT_ORIGIN_SYSTEM && mnt->mode == MOUNT_MODE_BIND)
 		export_type = WORMHOLE_EXPORT_TRANSPARENT;
+	else
+	if (mnt->origin == MOUNT_ORIGIN_SYSTEM && mnt->mode == MOUNT_MODE_OVERLAY) {
+		export_type = WORMHOLE_EXPORT_SEMITRANSPARENT;
+		layer = wormhole_layer_get_system();
+	} else {
+		log_error("%s: cannot add %s: invalid combination of origin/mode", __func__, mnt->path);
+		return false;
+	}
 	return fstree_add_export(farm->tree, mnt->path, export_type, mnt->dtype, layer);
 }
 

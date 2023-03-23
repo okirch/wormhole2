@@ -871,6 +871,12 @@ read_config(struct imgdelta_config *cfg, const char *filename)
 
 			mount_config_array_add(&cfg->mounts, value, DT_REG, MOUNT_ORIGIN_SYSTEM, MOUNT_MODE_BIND);
 		} else
+		if (!strcmp(kwd, "semitransparent-mount")) {
+			if (!check_absolute_path(filename, lineno, kwd, value))
+				goto done;
+
+			mount_config_array_add(&cfg->mounts, value, DT_DIR, MOUNT_ORIGIN_SYSTEM, MOUNT_MODE_OVERLAY);
+		} else
 		if (!strcmp(kwd, "entry-point")) {
 			if (!check_absolute_path(filename, lineno, kwd, value))
 				goto done;
