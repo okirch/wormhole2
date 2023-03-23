@@ -359,8 +359,8 @@ image_remove(const char *image_root, struct fsutil_ftw_cursor *cursor)
 bool
 copy_recursively(const char *src_path, const char *dst_path)
 {
-        struct fsutil_ftw_ctx *ctx;
-        struct fsutil_ftw_cursor cursor;
+	struct fsutil_ftw_ctx *ctx;
+	struct fsutil_ftw_cursor cursor;
 	bool ok = true;
 
 	if (!fsutil_makedirs(dst_path, 0755))
@@ -372,12 +372,12 @@ copy_recursively(const char *src_path, const char *dst_path)
 		return false;
 	}
 
-        while (fsutil_ftw_next(ctx, &cursor)) {
+	while (fsutil_ftw_next(ctx, &cursor)) {
 		char dst[PATH_MAX];
 
 		snprintf(dst, sizeof(dst), "%s/%s", dst_path, cursor.relative_path);
 		ok = image_copy(dst_path, &cursor) && ok;
-        }
+	}
 
 	fsutil_ftw_ctx_free(ctx);
 	return ok;
@@ -691,7 +691,7 @@ create_mount_farm_for_layer(struct wormhole_layer *layer, struct imgdelta_config
 			const char *full_path = __pathutil_concat2(layer->image_path, dir_path);
 
 			if (!fsutil_exists(full_path) || fsutil_dir_is_empty(full_path)) {
-				trace("layer %s does not provide %s", layer->name, dir_path);
+				trace2("layer %s does not provide %s, will not be included in layer config", layer->name, dir_path);
 				continue;
 			}
 		}
@@ -1003,7 +1003,7 @@ main(int argc, char **argv)
 	}
 
 	if (config.layers_used.count == 0 && !config.create_base_layer) {
-		log_error("No lower layers specified (if you want to create a base layer, explicitly usr --create-base-layer)");
+		log_error("No lower layers specified (if you want to create a base layer, explicitly use --create-base-layer)");
 		return 1;
 	}
 	if (config.layers_used.count != 0 && config.create_base_layer) {

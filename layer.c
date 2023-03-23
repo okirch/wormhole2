@@ -319,10 +319,8 @@ wormhole_layer_create_default_wrapper_symlinks(struct wormhole_layer *layer)
 	for (i = 0; i < layer->entry_points.count; ++i) {
 		const char *name = basename(layer->entry_points.data[i]);
 
-		trace("add EP symlink %s", name);
 		strutil_mapping_add_no_override(&layer->entry_point_symlinks, name, name);
 	}
-	trace("fone");
 	return true;
 }
 
