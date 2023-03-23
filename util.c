@@ -833,6 +833,12 @@ fsutil_isblk(const char *path)
 	return !!S_ISBLK(stb.st_mode);
 }
 
+bool
+__fsutil_is_whiteout(const struct stat *st)
+{
+	return st->st_mode == S_IFCHR && st->st_rdev == 0;
+}
+
 int
 __fsutil_get_dtype(const struct stat *st)
 {
