@@ -1083,6 +1083,7 @@ do_run(struct wormhole_context *ctx)
 
 enum {
 	OPT_BUILD_USER_LAYER = 256,
+	OPT_BUILD_SITE_LAYER,
 	OPT_BUILD_SYSTEM_LAYER,
 	OPT_BOOT,
 	OPT_RUNAS_ROOT,
@@ -1099,6 +1100,8 @@ static struct option	long_options[] = {
 	{ "build",	required_argument,	NULL,	OPT_BUILD_USER_LAYER },
 	{ "build-user-layer",
 			required_argument,	NULL,	OPT_BUILD_USER_LAYER },
+	{ "build-site-layer",
+			required_argument,	NULL,	OPT_BUILD_SITE_LAYER },
 	{ "build-system-layer",
 			required_argument,	NULL,	OPT_BUILD_SYSTEM_LAYER },
 	{ "boot",	required_argument,	NULL,	OPT_BOOT	},
@@ -1134,6 +1137,10 @@ main(int argc, char **argv)
 		case 'B':
 		case OPT_BUILD_USER_LAYER:
 			wormhole_context_set_build(ctx, optarg, BUILD_USER_LAYER);
+			break;
+
+		case OPT_BUILD_SITE_LAYER:
+			wormhole_context_set_build(ctx, optarg, BUILD_SITE_LAYER);
 			break;
 
 		case OPT_BUILD_SYSTEM_LAYER:
