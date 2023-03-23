@@ -105,8 +105,7 @@ struct wormhole_layer {
 
 	bool			is_root;
 
-	struct mount_config_array	stacked_directories;
-	struct mount_config_array	transparent_directories;
+	struct mount_config_array mounts;
 	struct strutil_array	entry_points;
 	struct strutil_mapping	entry_point_symlinks;
 

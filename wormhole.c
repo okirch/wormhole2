@@ -74,7 +74,7 @@ system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *
 			for (j = 0; j < cursor->overlay.dirs->count; ++j) {
 				const char *overlay_path = cursor->overlay.dirs->data[j];
 
-				mount_config_array_add(&l->stacked_directories, overlay_path, DT_DIR,
+				mount_config_array_add(&l->mounts, overlay_path, DT_DIR,
 						MOUNT_ORIGIN_LAYER, MOUNT_MODE_OVERLAY);
 			}
 
@@ -893,13 +893,16 @@ record_modified_mounts_to_layer(struct wormhole_context *ctx, struct wormhole_la
 		struct wormhole_layer *layer = ctx->layers.data[i];
 		unsigned int j;
 
-		for (j = 0; j < layer->stacked_directories.count; ++j) {
-			struct mount_config *mnt = layer->stacked_directories.data[j];
+		for (j = 0; j < layer->mounts.count; ++j) {
+			struct mount_config *mnt = layer->mounts.data[j];
 			const char *image_dir_path;
+
+			if (mnt->origin != MOUNT_ORIGIN_LAYER)
+				continue;
 
 			image_dir_path = __pathutil_concat2(image_root, mnt->path);
 			if (fsutil_exists(image_dir_path)) {
-				if (!mount_config_array_append(&new_layer->stacked_directories, mnt)) {
+				if (!mount_config_array_append(&new_layer->mounts, mnt)) {
 					log_error("Cannot add %s to layer's stacked mounts", mnt->path);
 					return false;
 				}
