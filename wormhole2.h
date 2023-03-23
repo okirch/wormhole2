@@ -176,6 +176,7 @@ extern void			mount_config_array_init(struct mount_config_array *);
 extern void			mount_config_array_destroy(struct mount_config_array *);
 extern struct mount_config *	mount_config_array_add(struct mount_config_array *, const char *path, int dtype);
 extern struct mount_config *	mount_config_array_append(struct mount_config_array *, struct mount_config *);
+extern struct mount_config *	mount_config_array_get(struct mount_config_array *, const char *path);
 
 extern struct mount_farm *	mount_farm_new(const char *farm_root);
 extern void			mount_farm_free(struct mount_farm *farm);

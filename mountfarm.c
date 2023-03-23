@@ -51,7 +51,7 @@ mount_config_new(const char *path, int dtype)
 		dtype = DT_UNKNOWN;
 
 	mnt = calloc(1, sizeof(*mnt));
-	strutil_set(&mnt->path, path);
+	mnt->path = pathutil_sanitize(path);
 	mnt->refcount = 1;
 	mnt->dtype = dtype;
 
@@ -134,6 +134,18 @@ mount_config_array_find(struct mount_config_array *a, const char *path, bool cre
 	__mount_config_array_append(a, mnt);
 
 	return mnt;
+}
+
+struct mount_config *
+mount_config_array_get(struct mount_config_array *a, const char *path)
+{
+	char *sane_path = pathutil_sanitize(path);
+	struct mount_config *found;
+
+	found = mount_config_array_find(a, sane_path, false);
+	strutil_drop(&sane_path);
+
+	return found;
 }
 
 struct mount_config *
