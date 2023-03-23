@@ -600,14 +600,19 @@ update_image_work(struct imgdelta_config *cfg, const char *tpath)
 				mnt->dtype = DT_DIR;
 			}
 
-			image_path = __pathutil_concat2(overlay, dir_path);
+			image_path = __pathutil_concat2(upperdir, dir_path);
 
 			if (mnt->dtype == DT_DIR) {
-				if (!fsutil_makedirs(image_path, 0755))
+				if (!fsutil_makedirs(image_path, 0755)) {
+					log_error("cannot create directory %s: %m", image_path);
 					rv = 1;
+				}
 			} else {
-				if (!fsutil_makefile(image_path, 0644))
+				(void) unlink(image_path);
+				if (!fsutil_makefile(image_path, 0644)) {
+					log_error("cannot create file %s: %m", image_path);
 					rv = 1;
+				}
 			}
 		}
 
