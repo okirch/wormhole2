@@ -492,7 +492,7 @@ failed:
 }
 
 static bool
-remove_spurious_whiteouts(const char *image_base, struct mount_config_array *transparent_mounts)
+remove_spurious_whiteouts(const char *image_base, struct mount_config_array *mounts)
 {
 	struct fsutil_ftw_ctx *ctx;
 	struct fsutil_ftw_cursor cursor;
@@ -505,8 +505,8 @@ remove_spurious_whiteouts(const char *image_base, struct mount_config_array *tra
 		if (__fsutil_is_whiteout(cursor.st)) {
 			struct mount_config *entry;
 
-			entry = mount_config_array_get(transparent_mounts, cursor.relative_path);
-			if (entry != NULL) {
+			entry = mount_config_array_get(mounts, cursor.relative_path);
+			if (entry != NULL && entry->origin == MOUNT_ORIGIN_SYSTEM) {
 				trace("%s is a whiteout entry for a transparent mount point", entry->path);
 				unlink(cursor.path);
 			}
@@ -575,8 +575,11 @@ update_image_work(struct imgdelta_config *cfg, const char *tpath)
 		return 1;
 
 	trace("=== Building image delta between system and %s ===", overlay);
-	for (i = 0; i < cfg->stacked_mounts.count; ++i) {
-		struct mount_config *mnt = cfg->stacked_mounts.data[i];
+	for (i = 0; i < cfg->mounts.count; ++i) {
+		struct mount_config *mnt = cfg->mounts.data[i];
+
+		if (mnt->origin != MOUNT_ORIGIN_LAYER)
+			continue;
 
 		rv = update_image_partial(cfg, overlay, mnt->path);
 		if (rv != 0)
@@ -584,16 +587,19 @@ update_image_work(struct imgdelta_config *cfg, const char *tpath)
 	}
 
 	trace("=== Removing spurious whiteouts from image delta ===");
-	if (!remove_spurious_whiteouts(upperdir, &cfg->transparent_mounts))
+	if (!remove_spurious_whiteouts(upperdir, &cfg->mounts))
 		return 1;
 
-	if (cfg->transparent_mounts.count) {
+	if (cfg->mounts.count) {
 		trace("=== Creating hooks for transparent mount points ===");
 
-		for (i = 0; i < cfg->transparent_mounts.count; ++i) {
-			struct mount_config *mnt = cfg->transparent_mounts.data[i];
+		for (i = 0; i < cfg->mounts.count; ++i) {
+			struct mount_config *mnt = cfg->mounts.data[i];
 			const char *dir_path = mnt->path;
 			const char *image_path;
+
+			if (mnt->origin != MOUNT_ORIGIN_SYSTEM)
+				continue;
 
 			if (mnt->dtype == DT_UNKNOWN) {
 				trace("%s default to directory", dir_path);
@@ -665,6 +671,31 @@ update_image(struct imgdelta_config *cfg)
 	return rv;
 }
 
+/*
+ * Decide whether we should add a given mount_config to the definition of a newly
+ * created layer.
+ */
+static inline bool
+layer_should_include_mount(const struct wormhole_layer *layer, const struct mount_config *mnt)
+{
+	const char *full_path = __pathutil_concat2(layer->image_path, mnt->path);
+
+	if (mnt->origin != MOUNT_ORIGIN_LAYER)
+		return true;
+
+	/* For the root layer, even include empty directories */
+	if (layer->is_root)
+		return true;
+
+	/* FIXME: distinguish between file and dir mounts */
+	if (!fsutil_exists(full_path) || fsutil_dir_is_empty(full_path)) {
+		trace2("layer %s does not provide %s, will not be included in layer config", layer->name, mnt->path);
+		return false;
+	}
+
+	return true;
+}
+
 static struct mount_farm *
 create_mount_farm_for_layer(struct wormhole_layer *layer, struct imgdelta_config *cfg)
 {
@@ -673,30 +704,15 @@ create_mount_farm_for_layer(struct wormhole_layer *layer, struct imgdelta_config
 
 	farm = mount_farm_new(layer->image_path);
 
-	for (i = 0; i < cfg->transparent_mounts.count; ++i) {
-		struct mount_config *mnt = cfg->transparent_mounts.data[i];
+	for (i = 0; i < cfg->mounts.count; ++i) {
+		struct mount_config *mnt = cfg->mounts.data[i];
 
-		if (!mount_farm_add_transparent(farm, mnt->path, mnt->dtype, layer))
-			goto failed;
-	}
-
-	for (i = 0; i < cfg->stacked_mounts.count; ++i) {
-		struct mount_config *mnt = cfg->stacked_mounts.data[i];
-		const char *dir_path = mnt->path;
-
-		/* For non-root layers, only include directories if they're non-empty */
 		/* FIXME: it would be better to move this check to a later stage. If we
 		 * do it here, we may miss some consistency problems. */
-		if (!layer->is_root) {
-			const char *full_path = __pathutil_concat2(layer->image_path, dir_path);
+		if (!layer_should_include_mount(layer, mnt))
+			continue;
 
-			if (!fsutil_exists(full_path) || fsutil_dir_is_empty(full_path)) {
-				trace2("layer %s does not provide %s, will not be included in layer config", layer->name, dir_path);
-				continue;
-			}
-		}
-
-		if (!mount_farm_add_stacked(farm, dir_path, layer))
+		if (!mount_farm_add_mount(farm, mnt, layer))
 			goto failed;
 	}
 
@@ -835,7 +851,7 @@ read_config(struct imgdelta_config *cfg, const char *filename)
 			if (!check_absolute_path(filename, lineno, kwd, value))
 				goto done;
 
-			mount_config_array_add(&cfg->stacked_mounts, value, DT_DIR);
+			mount_config_array_add(&cfg->mounts, value, DT_DIR, MOUNT_ORIGIN_LAYER, MOUNT_MODE_OVERLAY);
 		} else
 		if (!strcmp(kwd, "exclude")) {
 			if (!check_absolute_path(filename, lineno, kwd, value))
@@ -847,13 +863,13 @@ read_config(struct imgdelta_config *cfg, const char *filename)
 			if (!check_absolute_path(filename, lineno, kwd, value))
 				goto done;
 
-			mount_config_array_add(&cfg->transparent_mounts, value, DT_DIR);
+			mount_config_array_add(&cfg->mounts, value, DT_DIR, MOUNT_ORIGIN_SYSTEM, MOUNT_MODE_BIND);
 		} else
 		if (!strcmp(kwd, "transparent-file-mount")) {
 			if (!check_absolute_path(filename, lineno, kwd, value))
 				goto done;
 
-			mount_config_array_add(&cfg->transparent_mounts, value, DT_REG);
+			mount_config_array_add(&cfg->mounts, value, DT_REG, MOUNT_ORIGIN_SYSTEM, MOUNT_MODE_BIND);
 		} else
 		if (!strcmp(kwd, "entry-point")) {
 			if (!check_absolute_path(filename, lineno, kwd, value))
@@ -917,7 +933,7 @@ main(int argc, char **argv)
 			break;
 
 		case 'C':
-			(void) mount_config_array_add(&config.stacked_mounts, optarg, DT_DIR);
+			(void) mount_config_array_add(&config.mounts, optarg, DT_DIR, MOUNT_ORIGIN_LAYER, MOUNT_MODE_OVERLAY);
 			break;
 
 		case 'L':
@@ -965,12 +981,16 @@ main(int argc, char **argv)
 
 	config.layer = wormhole_layer_new(basename(layer_path), layer_path, 0);
 
-	if (config.stacked_mounts.count == 0) {
+#if 0
+	if (config.mounts.count == 0) {
 		const char **dirs = default_copydirs, *path;
 
 		for (dirs = default_copydirs; (path = *dirs++) != NULL; )
-			mount_config_array_add(&config.stacked_mounts, path, DT_DIR);
+			mount_config_array_add(&config.mounts, path, DT_DIR, MOUNT_ORIGIN_SYSTEM, MOUNT_MODE_OVERLAY);
 	}
+#else
+	(void) default_copydirs;
+#endif
 
 	if (tracing_level > 0) {
 		unsigned int i;
@@ -986,9 +1006,11 @@ main(int argc, char **argv)
 				trace("  %s", config.layers_used.data[i]);
 
 		trace("Dirs to copy");
-		for (i = 0; i < config.stacked_mounts.count; ++i) {
-			struct mount_config *mnt = config.stacked_mounts.data[i];
-			trace("  %u %s", mnt->dtype, mnt->path);
+		for (i = 0; i < config.mounts.count; ++i) {
+			struct mount_config *mnt = config.mounts.data[i];
+
+			if (mnt->origin == MOUNT_ORIGIN_LAYER)
+				trace("  %s %s", fsutil_dtype_as_string(mnt->dtype), mnt->path);
 		}
 
 		if (config.excldirs.count)

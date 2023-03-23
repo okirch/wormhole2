@@ -75,7 +75,7 @@ mount_config_release(struct mount_config *mnt)
 }
 
 static inline bool
-__mount_config_update_dtype(struct mount_config *mnt, int dtype)
+__mount_config_update(struct mount_config *mnt, int dtype, mount_mode_t mode, mount_origin_t origin)
 {
 	if (dtype < 0)
 		return true;
@@ -87,6 +87,10 @@ __mount_config_update_dtype(struct mount_config *mnt, int dtype)
 				mnt->path, mnt->dtype, dtype);
 		return false;
 	}
+
+	/* For now, just overwrite and never complain */
+	mnt->mode = mode;
+	mnt->origin = origin;
 
 	return true;
 }
@@ -149,12 +153,12 @@ mount_config_array_get(struct mount_config_array *a, const char *path)
 }
 
 struct mount_config *
-mount_config_array_add(struct mount_config_array *a, const char *path, int dtype)
+mount_config_array_add(struct mount_config_array *a, const char *path, int dtype, mount_origin_t origin, mount_mode_t mode)
 {
 	struct mount_config *mnt;
 
 	mnt = mount_config_array_find(a, path, true);
-	if (mnt && !__mount_config_update_dtype(mnt, dtype))
+	if (mnt && !__mount_config_update(mnt, dtype, mode, origin))
 		return NULL;
 	return mnt;
 }
@@ -170,7 +174,7 @@ mount_config_array_append(struct mount_config_array *a, struct mount_config *mnt
 		return mnt;
 	}
 
-	if (!__mount_config_update_dtype(existing, mnt->dtype))
+	if (!__mount_config_update(existing, mnt->dtype, mnt->mode, mnt->origin))
 		return NULL;
 
 	return existing;
@@ -495,6 +499,19 @@ struct fstree_node *
 mount_farm_add_transparent(struct mount_farm *farm, const char *system_path, int dtype, struct wormhole_layer *layer)
 {
 	return fstree_add_export(farm->tree, system_path, WORMHOLE_EXPORT_TRANSPARENT, dtype, layer);
+}
+
+struct fstree_node *
+mount_farm_add_mount(struct mount_farm *farm, const struct mount_config *mnt, struct wormhole_layer *layer)
+{
+	int export_type;
+
+	if (mnt->origin == MOUNT_ORIGIN_LAYER && mnt->mode == MOUNT_MODE_OVERLAY)
+		export_type = WORMHOLE_EXPORT_STACKED;
+	else
+	if (mnt->origin == MOUNT_ORIGIN_SYSTEM && mnt->mode == MOUNT_MODE_BIND)
+		export_type = WORMHOLE_EXPORT_TRANSPARENT;
+	return fstree_add_export(farm->tree, mnt->path, export_type, mnt->dtype, layer);
 }
 
 bool

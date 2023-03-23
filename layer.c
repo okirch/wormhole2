@@ -251,9 +251,10 @@ __parse_boolean(const char *path, unsigned int line, const char *value, bool *re
 }
 
 static bool
-__parse_mount(struct mount_config_array *a, const char *kwd, char *value, int dtype)
+__parse_mount(struct mount_config_array *a, const char *kwd, char *value, int dtype,
+		mount_origin_t mode, mount_origin_t origin)
 {
-	return !!mount_config_array_add(a, value, dtype);
+	return !!mount_config_array_add(a, value, dtype, mode, origin);
 }
 
 bool
@@ -294,13 +295,16 @@ wormhole_layer_load_config(struct wormhole_layer *layer)
 			strutil_array_append(&layer->used, value);
 		} else
 		if (!strcmp(kwd, "stacked-mount")) {
-			okay = __parse_mount(&layer->stacked_directories, kwd, value, DT_DIR);
+			okay = __parse_mount(&layer->stacked_directories, kwd, value, DT_DIR,
+					MOUNT_ORIGIN_LAYER, MOUNT_MODE_OVERLAY);
 		} else
 		if (!strcmp(kwd, "transparent-mount")) {
-			okay = __parse_mount(&layer->transparent_directories, kwd, value, DT_DIR);
+			okay = __parse_mount(&layer->transparent_directories, kwd, value, DT_DIR,
+					MOUNT_ORIGIN_SYSTEM, MOUNT_MODE_BIND);
 		} else
 		if (!strcmp(kwd, "transparent-file-mount")) {
-			okay = __parse_mount(&layer->transparent_directories, kwd, value, DT_REG);
+			okay = __parse_mount(&layer->transparent_directories, kwd, value, DT_REG,
+					MOUNT_ORIGIN_SYSTEM, MOUNT_MODE_BIND);
 		} else {
 			log_error("%s:%u: unsupported directive %s=%s",
 					layer->config_path, line,
@@ -563,10 +567,12 @@ wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct
 		/* nothing to be done */
 	} else
 	if (tree->export_type == WORMHOLE_EXPORT_STACKED) {
-		okay = mount_config_array_add(&layer->stacked_directories, tree->relative_path, tree->dtype);
+		okay = mount_config_array_add(&layer->stacked_directories, tree->relative_path, tree->dtype,
+				MOUNT_ORIGIN_LAYER, MOUNT_MODE_OVERLAY);
 	} else
 	if (tree->export_type == WORMHOLE_EXPORT_TRANSPARENT) {
-		okay = mount_config_array_add(&layer->transparent_directories, tree->relative_path, tree->dtype);
+		okay = mount_config_array_add(&layer->transparent_directories, tree->relative_path, tree->dtype,
+				MOUNT_ORIGIN_SYSTEM, MOUNT_MODE_BIND);
 	} else
 	if (tree->export_type != WORMHOLE_EXPORT_NONE) {
 		log_error("%s: bad export type %u at %s", __func__, tree->export_type, tree->relative_path);

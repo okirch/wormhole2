@@ -74,7 +74,8 @@ system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *
 			for (j = 0; j < cursor->overlay.dirs->count; ++j) {
 				const char *overlay_path = cursor->overlay.dirs->data[j];
 
-				mount_config_array_add(&l->stacked_directories, overlay_path, DT_DIR);
+				mount_config_array_add(&l->stacked_directories, overlay_path, DT_DIR,
+						MOUNT_ORIGIN_LAYER, MOUNT_MODE_OVERLAY);
 			}
 
 			wormhole_layer_array_append(&node->attached_layers, l);

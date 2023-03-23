@@ -70,10 +70,22 @@ struct fstree_node {
 	struct wormhole_layer_array attached_layers;
 };
 
+typedef enum {
+	MOUNT_ORIGIN_LAYER,
+	MOUNT_ORIGIN_SYSTEM,
+} mount_origin_t;
+
+typedef enum {
+	MOUNT_MODE_OVERLAY,
+	MOUNT_MODE_BIND,
+} mount_mode_t;
+
 struct mount_config {
 	unsigned int		refcount;
 	char *			path;
 	int			dtype;	/* for now, DT_DIR or DT_REG */
+	mount_mode_t		mode;
+	mount_origin_t		origin;
 };
 
 struct mount_config_array {
@@ -177,7 +189,8 @@ extern void			fstree_iterator_free(struct fstree_iter *);
 
 extern void			mount_config_array_init(struct mount_config_array *);
 extern void			mount_config_array_destroy(struct mount_config_array *);
-extern struct mount_config *	mount_config_array_add(struct mount_config_array *, const char *path, int dtype);
+extern struct mount_config *	mount_config_array_add(struct mount_config_array *, const char *path, int dtype,
+					mount_origin_t origin, mount_mode_t mode);
 extern struct mount_config *	mount_config_array_append(struct mount_config_array *, struct mount_config *);
 extern struct mount_config *	mount_config_array_get(struct mount_config_array *, const char *path);
 
@@ -189,6 +202,7 @@ extern struct fstree_node *	mount_farm_find_leaf(struct mount_farm *farm, const 
 extern bool			mount_farm_mount_all(struct mount_farm *farm);
 extern struct fstree_node *	mount_farm_add_system_dir(struct mount_farm *farm, const char *system_path);
 extern bool			mount_farm_bind_system_dir(struct mount_farm *farm, const char *system_path);
+extern struct fstree_node *	mount_farm_add_mount(struct mount_farm *farm, const struct mount_config *mnt, struct wormhole_layer *layer);
 extern struct fstree_node *	mount_farm_add_stacked(struct mount_farm *farm, const char *system_path, struct wormhole_layer *layer);
 extern struct fstree_node *	mount_farm_add_transparent(struct mount_farm *farm, const char *system_path,
 					int dtype, struct wormhole_layer *layer);
