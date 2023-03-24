@@ -457,7 +457,7 @@ mount_farm_percolate(struct mount_farm *farm)
 }
 
 struct fstree_node *
-fstree_add_export(struct fstree *fstree, const char *system_path, unsigned int export_type, int dtype, struct wormhole_layer *layer)
+fstree_add_export(struct fstree *fstree, const char *system_path, unsigned int export_type, int dtype, struct wormhole_layer *layer, int flags)
 {
 	struct fstree_node *node;
 
@@ -483,6 +483,9 @@ fstree_add_export(struct fstree *fstree, const char *system_path, unsigned int e
 		return NULL;
 	}
 
+	if (flags & FSTREE_ADD_REPLACE_LAYERS)
+		wormhole_layer_array_destroy(&node->attached_layers);
+
 	if (layer)
 		wormhole_layer_array_append(&node->attached_layers, layer);
 	return node;
@@ -491,19 +494,19 @@ fstree_add_export(struct fstree *fstree, const char *system_path, unsigned int e
 struct fstree_node *
 mount_farm_add_stacked(struct mount_farm *farm, const char *system_path, struct wormhole_layer *layer)
 {
-	return fstree_add_export(farm->tree, system_path, WORMHOLE_EXPORT_STACKED, DT_DIR, layer);
+	return fstree_add_export(farm->tree, system_path, WORMHOLE_EXPORT_STACKED, DT_DIR, layer, 0);
 }
 
 struct fstree_node *
 mount_farm_add_transparent(struct mount_farm *farm, const char *system_path, int dtype, struct wormhole_layer *layer)
 {
-	return fstree_add_export(farm->tree, system_path, WORMHOLE_EXPORT_TRANSPARENT, dtype, layer);
+	return fstree_add_export(farm->tree, system_path, WORMHOLE_EXPORT_TRANSPARENT, dtype, layer, 0);
 }
 
 struct fstree_node *
 mount_farm_add_mount(struct mount_farm *farm, const struct mount_config *mnt, struct wormhole_layer *layer)
 {
-	int export_type;
+	int export_type, flags = 0;
 
 	if (mnt->origin == MOUNT_ORIGIN_LAYER && mnt->mode == MOUNT_MODE_OVERLAY)
 		export_type = WORMHOLE_EXPORT_STACKED;
@@ -514,11 +517,12 @@ mount_farm_add_mount(struct mount_farm *farm, const struct mount_config *mnt, st
 	if (mnt->origin == MOUNT_ORIGIN_SYSTEM && mnt->mode == MOUNT_MODE_OVERLAY) {
 		export_type = WORMHOLE_EXPORT_SEMITRANSPARENT;
 		layer = wormhole_layer_get_system();
+		flags = FSTREE_ADD_REPLACE_LAYERS;
 	} else {
 		log_error("%s: cannot add %s: invalid combination of origin/mode", __func__, mnt->path);
 		return false;
 	}
-	return fstree_add_export(farm->tree, mnt->path, export_type, mnt->dtype, layer);
+	return fstree_add_export(farm->tree, mnt->path, export_type, mnt->dtype, layer, flags);
 }
 
 bool

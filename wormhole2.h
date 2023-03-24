@@ -172,13 +172,17 @@ struct wormhole_context {
 	struct fsutil_tempdir	temp;
 };
 
+/* Flags for fstree_add_export */
+#define FSTREE_ADD_REPLACE_LAYERS	0x0001
+
 struct fstree *			fstree_new(const char *root_path);
 extern void			fstree_free(struct fstree *fstree);
 extern struct fstree_node *	fstree_create_leaf(struct fstree *fstree, const char *relative_path);
 extern const char *		fstree_get_full_path(struct fstree *fstree, const char *relative_path);
 extern struct fstree_node *	fstree_add_export(struct fstree *fstree, const char *system_path,
 					unsigned int export_type, int dtype,
-					struct wormhole_layer *layer);
+					struct wormhole_layer *layer,
+					int flags);
 extern bool			fstree_drop_pattern(struct fstree *fstree, const char *pattern, struct strutil_array *dropped);
 extern void			fstree_print(struct fstree *tree);
 

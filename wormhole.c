@@ -56,9 +56,9 @@ system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *
 	dtype = fsutil_get_dtype(cursor->mountpoint);
 
 	if (strcmp(cursor->fstype, "overlay") || BIND_SYSTEM_OVERLAYS) {
-		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_STACKED, dtype, NULL);
+		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_STACKED, dtype, NULL, 0);
 	} else {
-		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_TRANSPARENT, dtype, NULL);
+		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_TRANSPARENT, dtype, NULL, 0);
 		if (node && cursor->overlay.dirs->count) {
 			struct wormhole_layer *l;
 			unsigned int j;
