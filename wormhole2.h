@@ -154,11 +154,13 @@ struct wormhole_context {
 	struct wormhole_layer_array layers;
 
 	/* PURPOSE_BUILD */
-	int			build_target_type;
-	char *			build_target;
-	char *			build_root;
-	char *			build_bindir;
-	bool			fudge_layer_dir_permissions;
+	struct {
+		int		target_type;
+		char *		target;
+		char *		root;
+		char *		bindir;
+		bool		fudge_layer_dir_permissions;
+	} build;
 
 	/* PURPOSE_BOOT */
 	char *			boot_device;

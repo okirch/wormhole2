@@ -325,9 +325,9 @@ wormhole_context_free(struct wormhole_context *ctx)
 	fsutil_tempdir_cleanup(&ctx->temp);
 	strutil_drop(&ctx->working_directory);
 	strutil_drop(&ctx->workspace);
-	strutil_drop(&ctx->build_target);
-	strutil_drop(&ctx->build_root);
-	strutil_drop(&ctx->build_bindir);
+	strutil_drop(&ctx->build.target);
+	strutil_drop(&ctx->build.root);
+	strutil_drop(&ctx->build.bindir);
 
 	if (ctx->farm) {
 		mount_farm_free(ctx->farm);
@@ -396,8 +396,8 @@ void
 wormhole_context_set_build(struct wormhole_context *ctx, const char *name, int type)
 {
 	wormhole_context_set_purpose(ctx, PURPOSE_BUILD);
-	strutil_set(&ctx->build_target, name);
-	ctx->build_target_type = type;
+	strutil_set(&ctx->build.target, name);
+	ctx->build.target_type = type;
 }
 
 static void
@@ -405,42 +405,42 @@ wormhole_context_set_build_defaults(struct wormhole_context *ctx)
 {
 	/* In order for unprivileged user builds to work properly, we need to "copy up" at least
 	 * all the directory inodes, so that they have the correct owner. */
-	if (ctx->build_target_type == LAYER_TYPE_USER && getuid() != 0) {
+	if (ctx->build.target_type == LAYER_TYPE_USER && getuid() != 0) {
 		/* log_fatal("User builds for users other than root not yet implemented."); */
-		ctx->fudge_layer_dir_permissions = true;
+		ctx->build.fudge_layer_dir_permissions = true;
 	}
 
 	/* Set the default build root */
-	if (ctx->build_root == NULL) {
-		ctx->build_root = wormhole_layer_make_path(ctx->build_target, ctx->build_target_type);
-		if (ctx->build_root == NULL)
-			log_fatal("Unable to determine layer path for build target %s", ctx->build_target);
+	if (ctx->build.root == NULL) {
+		ctx->build.root = wormhole_layer_make_path(ctx->build.target, ctx->build.target_type);
+		if (ctx->build.root == NULL)
+			log_fatal("Unable to determine layer path for build target %s", ctx->build.target);
 	}
 
-	if (fsutil_exists(ctx->build_root)) {
+	if (fsutil_exists(ctx->build.root)) {
 		if (!ctx->force)
-			log_fatal("%s already exists, timidly refusing to proceed", ctx->build_root);
+			log_fatal("%s already exists, timidly refusing to proceed", ctx->build.root);
 
 		/* FIXME: we should probably build the new layer in a .tmp location and then
 		 * move it into place. */
-		if (!fsutil_remove_recursively(ctx->build_root))
+		if (!fsutil_remove_recursively(ctx->build.root))
 			log_fatal("failed to remove previous build of %s (located in %s)",
-					ctx->build_target, ctx->build_root);
+					ctx->build.target, ctx->build.root);
 	}
 
 	/* On transactional systems, where /usr is readonly, we won't be able to
 	 * create system and site layers. Catch this early on. */
-	if (!fsutil_makedirs(ctx->build_root, 0755))
-		log_fatal("Unable to initialize build root %s: %m", ctx->build_root);
+	if (!fsutil_makedirs(ctx->build.root, 0755))
+		log_fatal("Unable to initialize build root %s: %m", ctx->build.root);
 
-	if (ctx->build_bindir == NULL && ctx->build_target_type == LAYER_TYPE_USER) {
+	if (ctx->build.bindir == NULL && ctx->build.target_type == LAYER_TYPE_USER) {
 		char *bindir = pathutil_expand(WORMHOLE_USER_BIN_DIR, true);
 
 		if (bindir == NULL) {
 			/* nothing */
 		} else
 		if (bindir && fsutil_isdir(bindir)) {
-			ctx->build_bindir = bindir;
+			ctx->build.bindir = bindir;
 		} else {
 			strutil_drop(&bindir);
 		}
@@ -521,9 +521,9 @@ prepare_tree_for_building(struct wormhole_context *ctx, bool remount_layers)
 	struct mount_farm *farm = ctx->farm;
 
 	trace("%s()", __func__);
-	assert(ctx->build_root);
+	assert(ctx->build.root);
 
-	if (!mount_farm_set_upper_base(farm, ctx->build_root))
+	if (!mount_farm_set_upper_base(farm, ctx->build.root))
 		return false;
 
 	if (!wormhole_context_resolve_layers(ctx, remount_layers))
@@ -532,7 +532,7 @@ prepare_tree_for_building(struct wormhole_context *ctx, bool remount_layers)
 	if (!mount_farm_discover(ctx->farm, &ctx->layers))
 		return false;
 
-	if (ctx->fudge_layer_dir_permissions) {
+	if (ctx->build.fudge_layer_dir_permissions) {
 		unsigned int i;
 
 		trace("Fudging directory permissions for layers");
@@ -546,7 +546,7 @@ prepare_tree_for_building(struct wormhole_context *ctx, bool remount_layers)
 		}
 
 		/* No need to do this twice */
-		ctx->fudge_layer_dir_permissions = false;
+		ctx->build.fudge_layer_dir_permissions = false;
 	}
 
 	return true;
@@ -776,7 +776,7 @@ prune_new_image(struct wormhole_context *ctx)
 	if (!prepare_tree_for_building(ctx, false))
 		return false;
 
-	pathutil_concat2(&image_root, ctx->build_root, "image");
+	pathutil_concat2(&image_root, ctx->build.root, "image");
 	trace("Pruning image tree:");
 	it = fstree_iterator_new(ctx->farm->tree, true);
 	while ((node = fstree_iterator_next(it)) != NULL) {
@@ -808,8 +808,8 @@ prune_new_image(struct wormhole_context *ctx)
 	fstree_iterator_free(it);
 	free(image_root);
 
-	trace("Removing work tree at %s/work", ctx->build_root);
-	fsutil_remove_recursively(__pathutil_concat2(ctx->build_root, "work"));
+	trace("Removing work tree at %s/work", ctx->build.root);
+	fsutil_remove_recursively(__pathutil_concat2(ctx->build.root, "work"));
 	return true;
 }
 
@@ -856,16 +856,16 @@ record_modified_mounts_to_layer(struct wormhole_context *ctx, struct wormhole_la
 	char *image_root = NULL;
 	unsigned int i;
 
-	assert(ctx->build_root);
+	assert(ctx->build.root);
 
-	if (!mount_farm_set_upper_base(farm, ctx->build_root))
+	if (!mount_farm_set_upper_base(farm, ctx->build.root))
 		return false;
 
 	if (!wormhole_context_resolve_layers(ctx, true))
 		return false;
 
 	trace("Applying layers");
-	pathutil_concat2(&image_root, ctx->build_root, "image");
+	pathutil_concat2(&image_root, ctx->build.root, "image");
 	for (i = 0; i < ctx->layers.count; ++i) {
 		struct wormhole_layer *layer = ctx->layers.data[i];
 		unsigned int j;
@@ -983,7 +983,7 @@ do_build(struct wormhole_context *ctx)
 	if (!prune_new_image(ctx))
 		return;
 
-	layer = wormhole_layer_new(ctx->build_target, ctx->build_root, 0);
+	layer = wormhole_layer_new(ctx->build.target, ctx->build.root, 0);
 	for (i = 0; i < ctx->layer_names.count; ++i) {
 		const char *name = ctx->layer_names.data[i];
 
@@ -1011,16 +1011,16 @@ do_build(struct wormhole_context *ctx)
 	if (ctx->auto_entry_points) {
 		discover_entry_points(layer);
 
-		if (ctx->build_target_type == LAYER_TYPE_USER)
+		if (ctx->build.target_type == LAYER_TYPE_USER)
 			wormhole_layer_create_default_wrapper_symlinks(layer);
 	}
 
-	if (!wormhole_layer_write_wrappers(layer, ctx->build_bindir)) {
+	if (!wormhole_layer_write_wrappers(layer, ctx->build.bindir)) {
 		log_error("Unable to create wrapper scripts for new layer");
 		return;
 	}
 
-	log_info("New image can be found in %s", ctx->build_root);
+	log_info("New image can be found in %s", ctx->build.root);
 	ctx->exit_status = 0;
 }
 
@@ -1151,7 +1151,7 @@ main(int argc, char **argv)
 			break;
 
 		case 'R':
-			strutil_set(&ctx->build_root, optarg);
+			strutil_set(&ctx->build.root, optarg);
 			break;
 
 		case 'L':
@@ -1180,7 +1180,7 @@ main(int argc, char **argv)
 			break;
 
 		case OPT_INSTALL_BINDIR:
-			strutil_set(&ctx->build_bindir, optarg);
+			strutil_set(&ctx->build.bindir, optarg);
 			break;
 
 		case OPT_LOGFILE:
