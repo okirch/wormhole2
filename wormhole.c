@@ -204,10 +204,12 @@ mount_farm_apply_quirks(struct mount_farm *farm)
 	if (node->fstype == NULL)
 		fstree_node_set_fstype(node, "bind", farm);
 
-	if (!(node = mount_farm_add_transparent(farm, "/tmp", DT_DIR, NULL)))
-		return false;
+	if (!mount_farm_has_mount_for(farm, "/tmp")) {
+		if (!(node = mount_farm_add_transparent(farm, "/tmp", DT_DIR, NULL)))
+			return false;
 
-	fstree_node_set_fstype(node, "tmpfs", farm);
+		fstree_node_set_fstype(node, "tmpfs", farm);
+	}
 
 	if (tracing_level > 0) {
 		trace("Assembled tree:");
