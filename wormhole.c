@@ -781,6 +781,9 @@ prune_new_image(struct wormhole_context *ctx)
 		if (node->parent == NULL)
 			break;
 
+		if (node->export_type != WORMHOLE_EXPORT_STACKED)
+			continue;
+
 		if ((dtype = fsutil_get_dtype(image_path)) < 0)
 			continue;
 
