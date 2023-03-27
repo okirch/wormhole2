@@ -125,12 +125,12 @@ system_mount_tree_discover(void)
 	fstree_drop_pattern(fstree, "/bin", &dropped);
 	fstree_drop_pattern(fstree, "/sbin", &dropped);
 
-	if (dropped.count) {
+	if (dropped.count && tracing_level > 0) {
 		unsigned int i;
 
-		log_info("Ignoring the following system mount(s):");
+		trace("Ignoring the following system mount(s):");
 		for (i = 0; i < dropped.count; ++i)
-			log_info("  %s", dropped.data[i]);
+			trace("  %s", dropped.data[i]);
 	}
 
 	return fstree;
@@ -209,9 +209,11 @@ mount_farm_apply_quirks(struct mount_farm *farm)
 
 	fstree_node_set_fstype(node, "tmpfs", farm);
 
-	trace("Assembled tree:");
-	fstree_print(farm->tree);
-	trace("---");
+	if (tracing_level > 0) {
+		trace("Assembled tree:");
+		fstree_print(farm->tree);
+		trace("---");
+	}
 
 	return true;
 }
