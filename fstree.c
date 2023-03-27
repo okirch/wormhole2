@@ -201,7 +201,8 @@ fstree_node_hide(struct fstree_node *node)
 	struct fstree_node *child;
 
 	trace2("Hide %s", node->relative_path);
-	strutil_set(&node->fstype, "hidden");
+	node->export_type = WORMHOLE_EXPORT_HIDE;
+	strutil_drop(&node->fstype);
 	for (child = node->children; child; child = child->next)
 		fstree_node_hide(child);
 }
@@ -375,7 +376,7 @@ fstree_node_mount(const struct fstree_node *node)
 	if (node->fstype == NULL)
 		return true;
 
-	if (!strcmp(node->fstype, "hidden")) {
+	if (node->export_type == WORMHOLE_EXPORT_HIDE) {
 		/* magic name - we just create the mount point but leave it unused. */
 		return true;
 	}
@@ -474,6 +475,8 @@ mount_export_type_as_string(int export_type)
 		return "transparent";
 	case WORMHOLE_EXPORT_SEMITRANSPARENT:
 		return "semitransparent";
+	case WORMHOLE_EXPORT_HIDE:
+		return "hidden";
 	case WORMHOLE_EXPORT_ERROR:
 		return "error";
 	}

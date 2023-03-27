@@ -346,9 +346,13 @@ __mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_anc
 	struct fstree_node *child;
 	unsigned int i;
 
-	trace3("%*.*s%s(%s [%s])",
+	trace3("%*.*s%s(%s [%s:%s])",
 			node->depth, node->depth, "",
-			__func__, node->relative_path, mount_export_type_as_string(node->export_type));
+			__func__, node->relative_path, mount_export_type_as_string(node->export_type), node->fstype);
+
+	if (node->export_type == WORMHOLE_EXPORT_HIDE)
+		return true;
+
 	if (node->export_type == WORMHOLE_EXPORT_STACKED) {
 		unsigned int n = 0;
 
@@ -540,10 +544,14 @@ mount_farm_add_missing_children(struct mount_farm *farm, const char *system_path
 	struct dirent *d;
 	bool okay = false;
 
+	trace3("%s(%s)", __func__, system_path);
 	if (!(dir_node = fstree_node_lookup(farm->tree->root, system_path, false))) {
 		trace("%s: oops, no mount node for %s?!", __func__, system_path);
 		return false;
 	}
+
+	if (dir_node->export_type == WORMHOLE_EXPORT_HIDE)
+		return true;
 
 	if (!(dir = opendir(system_path))) {
 		log_error("%s: %s: %m", __func__, system_path);
@@ -574,6 +582,7 @@ mount_farm_add_missing_children(struct mount_farm *farm, const char *system_path
 				log_error("%s: cannot add transparent mount for %s", __func__, path);
 				goto out;
 			}
+			trace3("%s: added a bind mount for %s", __func__, child->relative_path);
 			fstree_node_set_fstype(child, "bind", farm);
 		}
 	}
