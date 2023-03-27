@@ -112,11 +112,18 @@ mount_config_array_destroy(struct mount_config_array *a)
 }
 
 static void
-__mount_config_array_append(struct mount_config_array *a, struct mount_config *mnt)
+__mount_config_array_append(struct mount_config_array *a, struct mount_config *mnt, bool transfer_ownership)
 {
 	if ((a->count % 16) == 0)
 		a->data = realloc(a->data, (a->count + 16) * sizeof(a->data[0]));
 	a->data[a->count++] = mnt;
+
+	if (transfer_ownership) {
+		/* Do NOT increment the refcount, assume the caller does this when adding
+		 * an existing mount. */
+	} else {
+		mnt->refcount++;
+	}
 }
 
 static struct mount_config *
@@ -135,7 +142,7 @@ mount_config_array_find(struct mount_config_array *a, const char *path, bool cre
 		return NULL;
 
 	mnt = mount_config_new(path, -1);
-	__mount_config_array_append(a, mnt);
+	__mount_config_array_append(a, mnt, false);
 
 	return mnt;
 }
@@ -170,7 +177,7 @@ mount_config_array_append(struct mount_config_array *a, struct mount_config *mnt
 
 	existing = mount_config_array_find(a, mnt->path, false);
 	if (existing == NULL) {
-		__mount_config_array_append(a, mnt);
+		__mount_config_array_append(a, mnt, true);
 		return mnt;
 	}
 
