@@ -415,11 +415,6 @@ wormhole_context_set_build_defaults(struct wormhole_context *ctx)
 			log_fatal("Unable to determine layer path for build target %s", ctx->build_target);
 	}
 
-	/* On transactional systems, where /usr is readonly, we won't be able to
-	 * create system and site layers. Catch this early on. */
-	if (!fsutil_makedirs(ctx->build_root, 0755))
-		log_fatal("Unable to initialize build root %s: %m", ctx->build_root);
-
 	if (fsutil_exists(ctx->build_root)) {
 		if (!ctx->force)
 			log_fatal("%s already exists, timidly refusing to proceed", ctx->build_root);
@@ -430,6 +425,11 @@ wormhole_context_set_build_defaults(struct wormhole_context *ctx)
 			log_fatal("failed to remove previous build of %s (located in %s)",
 					ctx->build_target, ctx->build_root);
 	}
+
+	/* On transactional systems, where /usr is readonly, we won't be able to
+	 * create system and site layers. Catch this early on. */
+	if (!fsutil_makedirs(ctx->build_root, 0755))
+		log_fatal("Unable to initialize build root %s: %m", ctx->build_root);
 
 	if (ctx->build_bindir == NULL && ctx->build_target_type == LAYER_TYPE_USER) {
 		char *bindir = pathutil_expand(WORMHOLE_USER_BIN_DIR, true);
