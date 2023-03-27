@@ -1600,10 +1600,17 @@ __fsutil_remove_callback(const char *dir_path, int dir_fd, const struct dirent *
 		flags = AT_REMOVEDIR;
 
 	if (unlinkat(dir_fd, d->d_name, flags) < 0) {
+		if (errno == EACCES) {
+			(void) fchmod(dir_fd, 0755);
+			if (unlinkat(dir_fd, d->d_name, flags) >= 0)
+				goto success;
+		}
+
 		log_error("Cannot remove %s/%s: %m", dir_path, d->d_name);
 		return FTW_ERROR;
 	}
 
+success:
 	return FTW_CONTINUE;
 }
 
