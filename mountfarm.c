@@ -480,6 +480,8 @@ fstree_add_export(struct fstree *fstree, const char *system_path, unsigned int e
 		node->export_type = export_type;
 	} else
 	if (node->export_type != export_type) {
+		if (flags & FSTREE_QUIET)
+			return NULL;
 		log_error("%s: conflicting export types (%s vs %s)", system_path,
 				mount_export_type_as_string(node->export_type),
 				mount_export_type_as_string(export_type));
@@ -489,8 +491,11 @@ fstree_add_export(struct fstree *fstree, const char *system_path, unsigned int e
 	if (node->dtype == DT_UNKNOWN || node->dtype < 0)
 		node->dtype = dtype;
 	else if (node->dtype != dtype) {
-		log_error("%s: conflicting file types (%u vs %u)", system_path,
-				node->dtype, dtype);
+		if (flags & FSTREE_QUIET) {
+			trace("%s: conflicting file types (%u vs %u)", system_path, node->dtype, dtype);
+		} else {
+			log_error("%s: conflicting file types (%u vs %u)", system_path, node->dtype, dtype);
+		}
 		return NULL;
 	}
 

@@ -173,6 +173,7 @@ struct wormhole_context {
 
 /* Flags for fstree_add_export */
 #define FSTREE_ADD_REPLACE_LAYERS	0x0001
+#define FSTREE_QUIET			0x0002
 
 struct fstree *			fstree_new(const char *root_path);
 extern void			fstree_free(struct fstree *fstree);
