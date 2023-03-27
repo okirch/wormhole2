@@ -560,38 +560,6 @@ prepare_tree_for_use(struct wormhole_context *ctx)
 	return true;
 }
 
-/* Really ancient testing ground. */
-bool
-prepare_tree_for_messing_around(struct wormhole_context *ctx)
-{
-	fsutil_makedirs("/var/tmp/lalla/lower", 0755);
-	fsutil_makedirs("/var/tmp/lalla/upper", 0755);
-	fsutil_makedirs("/var/tmp/lalla/work", 0755);
-	fsutil_makedirs("/var/tmp/lalla/root", 0755);
-	fsutil_makedirs("/var/tmp/lalla/usr-local", 0755);
-
-	system("grep /local /proc/mounts");
-	if (mount("/usr/local", "/var/tmp/lalla/usr-local", NULL, MS_BIND|MS_REC, NULL) < 0)
-		perror("fnord");
-	system("grep /local /proc/mounts");
-	if (umount("/usr/local") < 0)
-		perror("fnord2");
-	system("grep /local /proc/mounts");
-	if (!fsutil_mount_bind("/usr", "/var/tmp/lalla/lower", 0))
-		return false;
-	system("ls /var/tmp/lalla/lower/local");
-	if (!fsutil_mount_bind("/var/tmp/lalla/usr-local", "/var/tmp/lalla/lower/local", 0))
-		return false;
-
-	if (mount("wormhole", "/var/tmp/lalla/root", "overlay", MS_NOATIME|MS_LAZYTIME|MS_RDONLY,
-			"lowerdir=/var/tmp/lalla/lower,upperdir=/var/tmp/lalla/upper,workdir=/var/tmp/lalla/work") < 0) {
-		perror("mount overlay");
-		return false;
-	}
-
-	return true;
-}
-
 static bool
 wormhole_context_switch_root(struct wormhole_context *ctx)
 {
