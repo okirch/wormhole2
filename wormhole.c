@@ -53,6 +53,10 @@ system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *
 		return false;
 	}
 
+	/* For the time being, ignore autofs mounts */
+	if (!strcmp(cursor->fstype, "autofs"))
+		return true;
+
 	dtype = fsutil_get_dtype(cursor->mountpoint);
 
 	if (strcmp(cursor->fstype, "overlay") || BIND_SYSTEM_OVERLAYS) {
