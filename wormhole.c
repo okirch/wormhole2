@@ -56,9 +56,9 @@ system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *
 	dtype = fsutil_get_dtype(cursor->mountpoint);
 
 	if (strcmp(cursor->fstype, "overlay") || BIND_SYSTEM_OVERLAYS) {
-		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_STACKED, dtype, NULL, 0);
-	} else {
 		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_TRANSPARENT, dtype, NULL, 0);
+	} else {
+		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_STACKED, dtype, NULL, 0);
 		if (node && cursor->overlay.dirs->count) {
 			struct wormhole_layer *l;
 			unsigned int j;
@@ -79,6 +79,8 @@ system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *
 			}
 
 			wormhole_layer_array_append(&node->attached_layers, l);
+			strutil_set(&node->fstype, "overlay");
+			return true;
 		}
 	}
 
@@ -87,14 +89,18 @@ system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *
 		return false;
 	}
 
-	if (node->fstype) {
-		log_error("%s: duplicate mount (%s -> %s)", cursor->mountpoint, node->fstype, cursor->fstype);
+	if (node->system.fstype) {
+		/* It's a setup problem for the system, but not a problem for us as we just bind mount
+		 * what's there. */
+		log_warning("%s: duplicate system mount (%s and %s)", cursor->mountpoint, node->system.fstype, cursor->fstype);
 		return false;
 	}
-	assert(node->fstype == NULL);
-	assert(node->fsname == NULL);
-	node->fstype = strdup(cursor->fstype);
-	node->fsname = strdup(cursor->fsname);
+
+	strutil_set(&node->system.fstype, cursor->fstype);
+	strutil_set(&node->system.fsname, cursor->fsname);
+
+	strutil_set(&node->fstype, "bind");
+
 	return true;
 }
 
@@ -156,27 +162,23 @@ mount_farm_discover_system_mounts(struct mount_farm *farm)
 		struct fstree_node *new_mount;
 
 		/* Just an internal tree node, not a mount */
-		if (node->export_type != WORMHOLE_EXPORT_TRANSPARENT)
+		if (node->export_type == WORMHOLE_EXPORT_ROOT
+		 || node->export_type == WORMHOLE_EXPORT_NONE)
 			continue;
 
-		new_mount = mount_farm_add_transparent(farm, node->relative_path, node->dtype, NULL);
-		if (new_mount == NULL)
-			goto out;
-
-		if (node->fsname && node->fsname[0] == '/' && fsutil_isblk(node->fsname)) {
-			/* this is a mount of an actual block based file system */
-			trace("%s is a mount of %s", node->relative_path, node->fsname);
-			fstree_node_set_fstype(new_mount, "bind", farm);
-		} else
-		if (new_mount->fstype == NULL || !strcmp(new_mount->fstype, node->fstype)) {
-			/* Most likely a virtual FS */
-			fstree_node_set_fstype(new_mount, node->fstype, farm);
+		new_mount = fstree_add_export(farm->tree, node->relative_path, node->export_type, node->dtype, NULL, FSTREE_QUIET);
+		if (new_mount == NULL) {
+			trace("overriding system mount for %s (%s) - replaced by platform", node->relative_path, node->system.fstype);
+			continue;
 		}
+
+		trace("created new system mount for %s (%s)", node->relative_path, node->fstype);
+		if (node->export_type != WORMHOLE_EXPORT_HIDE)
+			fstree_node_set_fstype(new_mount, node->fstype, farm);
 	}
 
 	okay = true;
 
-out:
 	if (!okay)
 		log_error("System mount discovery failed");
 

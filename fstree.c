@@ -376,10 +376,9 @@ fstree_node_mount(const struct fstree_node *node)
 	if (node->fstype == NULL)
 		return true;
 
-	if (node->export_type == WORMHOLE_EXPORT_HIDE) {
-		/* magic name - we just create the mount point but leave it unused. */
+	/* mount hiding - we just create the mount point but leave it unused. */
+	if (node->export_type == WORMHOLE_EXPORT_HIDE)
 		return true;
-	}
 
 #if 0
 	if (node->upper && chown(node->upper, 0, 0))

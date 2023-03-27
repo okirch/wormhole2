@@ -66,7 +66,11 @@ struct fstree_node {
 
 	char *		fstype;
 	char *		fsname;
-	struct strutil_array	system_overlay_dirs;
+	struct {
+		char *	fstype;
+		char *	fsname;
+		struct strutil_array overlay_dirs;
+	} system;
 
 	struct wormhole_layer *bind_mount_override_layer;
 	struct wormhole_layer_array attached_layers;
