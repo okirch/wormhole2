@@ -101,7 +101,6 @@ system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *
 static struct fstree *
 system_mount_tree_discover(void)
 {
-	struct strutil_array dropped = { 0, };
 	fsutil_mount_iterator_t *it;
 	fsutil_mount_cursor_t cursor;
 	struct fstree *fstree;
@@ -118,20 +117,15 @@ system_mount_tree_discover(void)
 
 	fstree->root->export_type = WORMHOLE_EXPORT_ROOT;
 
-	fstree_drop_pattern(fstree, "/tmp/*", &dropped);
-	fstree_drop_pattern(fstree, "/usr", &dropped);
-	fstree_drop_pattern(fstree, "/lib", &dropped);
-	fstree_drop_pattern(fstree, "/lib64", &dropped);
-	fstree_drop_pattern(fstree, "/bin", &dropped);
-	fstree_drop_pattern(fstree, "/sbin", &dropped);
-
-	if (dropped.count && tracing_level > 0) {
-		unsigned int i;
-
-		trace("Ignoring the following system mount(s):");
-		for (i = 0; i < dropped.count; ++i)
-			trace("  %s", dropped.data[i]);
-	}
+	fstree_hide_pattern(fstree, "/tmp/*");
+	fstree_hide_pattern(fstree, "/usr");
+	fstree_hide_pattern(fstree, "/lib");
+	fstree_hide_pattern(fstree, "/lib64");
+	fstree_hide_pattern(fstree, "/bin");
+	fstree_hide_pattern(fstree, "/sbin");
+	fstree_hide_pattern(fstree, "/boot");
+	fstree_hide_pattern(fstree, "/.snapshots");
+	fstree_hide_pattern(fstree, "/var/lib/overlay");
 
 	return fstree;
 }

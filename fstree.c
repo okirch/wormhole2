@@ -192,17 +192,30 @@ fstree_node_lookup(struct fstree_node *parent, const char *relative_path, bool c
 	return node;
 }
 
+/*
+ * Given a fnmatch pattern, mark all tree nodes as hidden.
+ */
+static inline void
+fstree_node_hide(struct fstree_node *node)
+{
+	struct fstree_node *child;
+
+	trace2("Hide %s", node->relative_path);
+	strutil_set(&node->fstype, "hidden");
+	for (child = node->children; child; child = child->next)
+		fstree_node_hide(child);
+}
+
 bool
-fstree_drop_pattern(struct fstree *fstree, const char *pattern, struct strutil_array *dropped)
+fstree_hide_pattern(struct fstree *fstree, const char *pattern)
 {
 	struct pathutil_parser path_parser;
-	struct fstree_node *node = NULL, **pos;
+	struct fstree_node *node = NULL, **pos = NULL;
 
 	pathutil_parser_init(&path_parser, pattern);
 
 	/* If the path is empty, return the node itself */
 	node = fstree->root;
-	pos = &fstree->root;
 
 	while (pathutil_parser_next(&path_parser)) {
 		const char *name = path_parser.namebuf;
@@ -210,13 +223,8 @@ fstree_drop_pattern(struct fstree *fstree, const char *pattern, struct strutil_a
 		if (!strcmp(name, "*")) {
 			struct fstree_node *child = NULL;
 
-			/* drop all children */
-			while ((child = node->children) != NULL) {
-				if (dropped)
-					strutil_array_append(dropped, child->relative_path);
-				node->children = child->next;
-				fstree_node_free(child);
-			}
+			for (child = node->children; child; child = child->next)
+				fstree_node_hide(child);
 			return true;
 		}
 
@@ -225,6 +233,7 @@ fstree_drop_pattern(struct fstree *fstree, const char *pattern, struct strutil_a
 			return false;
 		}
 
+		pos = &node->children;
 		while ((node = *pos) != NULL) {
 			if (!strcmp(node->name, name))
 				break;
@@ -233,16 +242,10 @@ fstree_drop_pattern(struct fstree *fstree, const char *pattern, struct strutil_a
 
 		if (node == NULL)
 			return false;
-
-		pos = &node->children;
 	}
 
-	if (node) {
-		if (dropped)
-			strutil_array_append(dropped, node->relative_path);
-		*pos = node->next;
-		fstree_node_free(node);
-	}
+	if (node)
+		fstree_node_hide(node);
 
 	return node;
 }

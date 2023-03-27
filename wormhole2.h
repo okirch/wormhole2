@@ -181,7 +181,7 @@ extern struct fstree_node *	fstree_add_export(struct fstree *fstree, const char 
 					unsigned int export_type, int dtype,
 					struct wormhole_layer *layer,
 					int flags);
-extern bool			fstree_drop_pattern(struct fstree *fstree, const char *pattern, struct strutil_array *dropped);
+extern bool			fstree_hide_pattern(struct fstree *fstree, const char *pattern);
 extern void			fstree_print(struct fstree *tree);
 
 extern struct fstree_iter *	fstree_iterator_new(struct fstree *fstree, bool depth_first);
