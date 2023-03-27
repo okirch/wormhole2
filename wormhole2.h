@@ -158,6 +158,7 @@ struct wormhole_context {
 	char *			build_target;
 	char *			build_root;
 	char *			build_bindir;
+	bool			fudge_layer_dir_permissions;
 
 	/* PURPOSE_BOOT */
 	char *			boot_device;
@@ -257,5 +258,6 @@ extern struct wormhole_layer *	wormhole_layer_get_system(void);
 extern bool			wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct fstree_node *tree);
 extern bool			wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm *farm);
 extern bool			wormhole_layers_resolve(struct wormhole_layer_array *layers, const struct strutil_array *names, const char *remount_image_base);
+extern bool			wormhole_layer_copyup_directories(const struct wormhole_layer *layer, const char *upperdir);
 
 #endif /* WORMHOLE2_H */

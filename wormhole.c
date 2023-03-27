@@ -405,8 +405,10 @@ wormhole_context_set_build_defaults(struct wormhole_context *ctx)
 {
 	/* In order for unprivileged user builds to work properly, we need to "copy up" at least
 	 * all the directory inodes, so that they have the correct owner. */
-	if (!ctx->force && ctx->build_target_type == LAYER_TYPE_USER && getuid() != 0)
-		log_fatal("User builds for users other than root not yet implemented.");
+	if (ctx->build_target_type == LAYER_TYPE_USER && getuid() != 0) {
+		/* log_fatal("User builds for users other than root not yet implemented."); */
+		ctx->fudge_layer_dir_permissions = true;
+	}
 
 	/* Set the default build root */
 	if (ctx->build_root == NULL) {
@@ -529,6 +531,23 @@ prepare_tree_for_building(struct wormhole_context *ctx, bool remount_layers)
 
 	if (!mount_farm_discover(ctx->farm, &ctx->layers))
 		return false;
+
+	if (ctx->fudge_layer_dir_permissions) {
+		unsigned int i;
+
+		trace("Fudging directory permissions for layers");
+		for (i = 0; i < ctx->layers.count; ++i) {
+			struct wormhole_layer *layer = ctx->layers.data[i];
+
+			/* FIXME: we should record the directories we copied up and try to prune
+			 * all the empty ones when done.
+			 */
+			wormhole_layer_copyup_directories(layer, ctx->farm->upper_base);
+		}
+
+		/* No need to do this twice */
+		ctx->fudge_layer_dir_permissions = false;
+	}
 
 	return true;
 }

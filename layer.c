@@ -620,6 +620,38 @@ wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm 
 }
 
 /*
+ * When building a user layer as non-root user, we need to pretend to that all
+ * system directories are writable. We do this by creating a copy of each 
+ * directory node in the upperdir layer, giving it the correct permissions,
+ * and above all, making it owned by the invoking user.
+ */
+bool
+wormhole_layer_copyup_directories(const struct wormhole_layer *layer, const char *upperdir)
+{
+	struct fsutil_ftw_ctx *ftw;
+	struct fsutil_ftw_cursor cursor;
+	const struct dirent *d;
+
+	trace(" %s -> %s", layer->image_path, upperdir);
+
+	if (!(ftw = fsutil_ftw_open("/", FSUTIL_FTW_NEED_STAT, layer->image_path)))
+		return true;
+
+	while ((d = fsutil_ftw_next(ftw, &cursor)) != NULL) {
+		const char *upper_path;
+
+		if (d->d_type != DT_DIR)
+			continue;
+
+		upper_path = __pathutil_concat2(upperdir, cursor.relative_path);
+		(void) fsutil_makedirs(upper_path, cursor.st->st_mode | 0700);
+	}
+
+	fsutil_ftw_ctx_free(ftw);
+	return true;
+}
+
+/*
  * Return the layer path for a given layer name and type.
  */
 char *
