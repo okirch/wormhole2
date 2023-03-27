@@ -160,6 +160,8 @@ struct wormhole_context {
 		char *		root;
 		char *		bindir;
 		bool		fudge_layer_dir_permissions;
+
+		struct strutil_array purge_directories;
 	} build;
 
 	/* PURPOSE_BOOT */
@@ -260,6 +262,7 @@ extern struct wormhole_layer *	wormhole_layer_get_system(void);
 extern bool			wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct fstree_node *tree);
 extern bool			wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm *farm);
 extern bool			wormhole_layers_resolve(struct wormhole_layer_array *layers, const struct strutil_array *names, const char *remount_image_base);
-extern bool			wormhole_layer_copyup_directories(const struct wormhole_layer *layer, const char *upperdir);
+extern bool			wormhole_layer_copyup_directories(const struct wormhole_layer *layer, const char *upperdir,
+					struct strutil_array *dir_list);
 
 #endif /* WORMHOLE2_H */

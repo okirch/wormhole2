@@ -626,7 +626,8 @@ wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm 
  * and above all, making it owned by the invoking user.
  */
 bool
-wormhole_layer_copyup_directories(const struct wormhole_layer *layer, const char *upperdir)
+wormhole_layer_copyup_directories(const struct wormhole_layer *layer, const char *upperdir,
+		struct strutil_array *dir_list)
 {
 	struct fsutil_ftw_ctx *ftw;
 	struct fsutil_ftw_cursor cursor;
@@ -645,6 +646,8 @@ wormhole_layer_copyup_directories(const struct wormhole_layer *layer, const char
 
 		upper_path = __pathutil_concat2(upperdir, cursor.relative_path);
 		(void) fsutil_makedirs(upper_path, cursor.st->st_mode | 0700);
+		if (dir_list)
+			strutil_array_append(dir_list, upper_path);
 	}
 
 	fsutil_ftw_ctx_free(ftw);

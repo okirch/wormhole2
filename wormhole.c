@@ -328,6 +328,7 @@ wormhole_context_free(struct wormhole_context *ctx)
 	strutil_drop(&ctx->build.target);
 	strutil_drop(&ctx->build.root);
 	strutil_drop(&ctx->build.bindir);
+	strutil_array_destroy(&ctx->build.purge_directories);
 
 	if (ctx->farm) {
 		mount_farm_free(ctx->farm);
@@ -406,7 +407,6 @@ wormhole_context_set_build_defaults(struct wormhole_context *ctx)
 	/* In order for unprivileged user builds to work properly, we need to "copy up" at least
 	 * all the directory inodes, so that they have the correct owner. */
 	if (ctx->build.target_type == LAYER_TYPE_USER && getuid() != 0) {
-		/* log_fatal("User builds for users other than root not yet implemented."); */
 		ctx->build.fudge_layer_dir_permissions = true;
 	}
 
@@ -532,6 +532,12 @@ prepare_tree_for_building(struct wormhole_context *ctx, bool remount_layers)
 	if (!mount_farm_discover(ctx->farm, &ctx->layers))
 		return false;
 
+	/* In order for unprivileged user builds to work properly, we need to "copy up" at least
+	 * all the directory inodes, so that they have the correct owner.
+	 * On the flip side, if we just did this mindlessly, we would end up with lots of useless
+	 * directories in the newly created image tree. To avoid that record the directories we
+	 * copied up and try to prune all the empty ones when done.
+	 */
 	if (ctx->build.fudge_layer_dir_permissions) {
 		unsigned int i;
 
@@ -539,10 +545,7 @@ prepare_tree_for_building(struct wormhole_context *ctx, bool remount_layers)
 		for (i = 0; i < ctx->layers.count; ++i) {
 			struct wormhole_layer *layer = ctx->layers.data[i];
 
-			/* FIXME: we should record the directories we copied up and try to prune
-			 * all the empty ones when done.
-			 */
-			wormhole_layer_copyup_directories(layer, ctx->farm->upper_base);
+			wormhole_layer_copyup_directories(layer, ctx->farm->upper_base, &ctx->build.purge_directories);
 		}
 
 		/* No need to do this twice */
@@ -778,6 +781,17 @@ prune_new_image(struct wormhole_context *ctx)
 
 	pathutil_concat2(&image_root, ctx->build.root, "image");
 	trace("Pruning image tree:");
+
+	/* First step: if we did a copy-up of directories, try to purge these. */
+	{
+		struct strutil_array *dirs = &ctx->build.purge_directories;
+		unsigned int i;
+
+		for (i = dirs->count; i--; )
+			(void) rmdir(dirs->data[i]);
+	}
+
+
 	it = fstree_iterator_new(ctx->farm->tree, true);
 	while ((node = fstree_iterator_next(it)) != NULL) {
 		const char *image_path = __pathutil_concat2(image_root, node->relative_path);
