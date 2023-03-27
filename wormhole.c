@@ -263,18 +263,6 @@ out:
 	return okay;
 }
 
-bool
-mount_farm_assemble_for_build(struct mount_farm *farm, struct wormhole_layer_array *layers)
-{
-	return mount_farm_discover(farm, layers);
-}
-
-bool
-mount_farm_assemble_for_run(struct mount_farm *farm, struct wormhole_layer_array *layers)
-{
-	return mount_farm_discover(farm, layers);
-}
-
 static int
 run_the_command(struct wormhole_context *ctx)
 {
@@ -539,8 +527,7 @@ prepare_tree_for_building(struct wormhole_context *ctx, bool remount_layers)
 	if (!wormhole_context_resolve_layers(ctx, remount_layers))
 		return false;
 
-	trace("About to call mount_farm_assemble_for_build");
-	if (!mount_farm_assemble_for_build(farm, &ctx->layers))
+	if (!mount_farm_discover(ctx->farm, &ctx->layers))
 		return false;
 
 	return true;
@@ -549,12 +536,10 @@ prepare_tree_for_building(struct wormhole_context *ctx, bool remount_layers)
 static bool
 prepare_tree_for_use(struct wormhole_context *ctx)
 {
-	struct mount_farm *farm = ctx->farm;
-
 	if (!wormhole_context_resolve_layers(ctx, true))
 		return false;
 
-	if (!mount_farm_assemble_for_run(farm, &ctx->layers))
+	if (!mount_farm_discover(ctx->farm, &ctx->layers))
 		return false;
 
 	return true;
