@@ -661,7 +661,7 @@ update_image(struct imgdelta_config *cfg)
 	if (!fsutil_make_fs_private("/", cfg->running_inside_chroot))
 		return 1;
 
-	if (!fsutil_tempdir_mount(&tempdir))
+	if (!cfg->no_tmpfs && !fsutil_tempdir_mount(&tempdir))
 		return 1;
 
 	rv = update_image_work(cfg, fsutil_tempdir_path(&tempdir));
@@ -763,6 +763,7 @@ write_layer_config(struct imgdelta_config *cfg)
 
 enum {
 	OPT_BINDIR = 256,
+	OPT_NO_TMPFS,
 };
 
 static struct option	long_options[] = {
@@ -772,6 +773,7 @@ static struct option	long_options[] = {
 	{ "exclude",		required_argument,	NULL,	'X'		},
 	{ "use-layer",		required_argument,	NULL,	'L'		},
 	{ "bindir",		required_argument,	NULL,	OPT_BINDIR	},
+	{ "no-tmpfs",		no_argument,		NULL,	OPT_NO_TMPFS	},
 	{ "force",		no_argument,		NULL,	'f'		},
 	{ "debug",		no_argument,		NULL,	'd'		},
 	{ "ignore-change",	required_argument,	NULL,	'I'		},
@@ -967,6 +969,10 @@ main(int argc, char **argv)
 
 		case OPT_BINDIR:
 			config.install_bindir = optarg;
+			break;
+
+		case OPT_NO_TMPFS:
+			config.no_tmpfs = true;
 			break;
 
 		default:

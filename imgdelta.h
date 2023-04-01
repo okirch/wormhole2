@@ -30,6 +30,7 @@ struct imgdelta_config {
 	bool			force;
 	bool			create_base_layer;
 	bool			running_inside_chroot;
+	bool			no_tmpfs;
 	unsigned int		ignore_change_mask;
 	char *			install_bindir;
 
