@@ -44,6 +44,11 @@ enum {
 	WORMHOLE_EXPORT_HIDE,
 };
 
+typedef const struct mount_ops {
+	const char *		name;
+	bool			(*mount)(const struct fstree_node *);
+} mount_ops_t;
+
 struct fstree_node {
 	struct fstree_node *parent;
 	struct fstree_node *next;
@@ -64,7 +69,7 @@ struct fstree_node {
 	char *		work;
 	char *		mountpoint;
 
-	char *		fstype;
+	mount_ops_t *	mount_ops;
 	char *		fsname;
 	struct {
 		char *	fstype;
@@ -184,6 +189,10 @@ struct wormhole_context {
 #define FSTREE_ADD_REPLACE_LAYERS	0x0001
 #define FSTREE_QUIET			0x0002
 
+extern mount_ops_t		mount_ops_overlay;
+extern mount_ops_t		mount_ops_bind;
+extern mount_ops_t		mount_ops_tmpfs;
+
 struct fstree *			fstree_new(const char *root_path);
 extern void			fstree_free(struct fstree *fstree);
 extern struct fstree_node *	fstree_create_leaf(struct fstree *fstree, const char *relative_path);
@@ -232,7 +241,7 @@ extern bool			fstree_node_is_mountpoint(const struct fstree_node *leaf);
 extern bool			fstree_node_is_below_mountpoint(const struct fstree_node *leaf);
 extern struct fstree_node *	fstree_node_lookup(struct fstree_node *parent, const char *relative_path, bool create);
 extern char *			fstree_node_relative_path(struct fstree_node *ancestor, struct fstree_node *node);
-extern bool			fstree_node_set_fstype(struct fstree_node *leaf, const char *fstype, struct mount_farm *farm);
+extern bool			fstree_node_set_fstype(struct fstree_node *leaf, mount_ops_t *ops, struct mount_farm *farm);
 extern bool			fstree_node_add_lower(struct fstree_node *leaf, const char *path);
 extern char *			fstree_node_build_lowerspec(const struct fstree_node *leaf);
 extern void			fstree_node_invalidate(struct fstree_node *leaf);
@@ -240,6 +249,12 @@ extern bool			fstree_node_zap_dirs(struct fstree_node *leaf);
 extern bool			fstree_node_mount(const struct fstree_node *leaf);
 extern bool			fstree_node_traverse(struct fstree_node *node, bool (*visitorfn)(const struct fstree_node *));
 extern const char *		mount_export_type_as_string(int export_type);
+
+static inline const char *
+fstree_node_fstype(const struct fstree_node *node)
+{
+	return node->mount_ops? node->mount_ops->name : NULL;
+}
 
 extern void			wormhole_layer_set_default_search_path(void);
 extern void			wormhole_layer_print_default_search_path(void);

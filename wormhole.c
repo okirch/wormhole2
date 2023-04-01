@@ -83,7 +83,7 @@ system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *
 			}
 
 			wormhole_layer_array_append(&node->attached_layers, l);
-			strutil_set(&node->fstype, "overlay");
+			node->mount_ops = &mount_ops_overlay;
 			return true;
 		}
 	}
@@ -103,7 +103,7 @@ system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *
 	strutil_set(&node->system.fstype, cursor->fstype);
 	strutil_set(&node->system.fsname, cursor->fsname);
 
-	strutil_set(&node->fstype, "bind");
+	node->mount_ops = &mount_ops_bind;
 
 	return true;
 }
@@ -176,9 +176,9 @@ mount_farm_discover_system_mounts(struct mount_farm *farm)
 			continue;
 		}
 
-		trace("created new system mount for %s (%s)", node->relative_path, node->fstype);
+		trace("created new system mount for %s (%s)", node->relative_path, fstree_node_fstype(node));
 		if (node->export_type != WORMHOLE_EXPORT_HIDE)
-			fstree_node_set_fstype(new_mount, node->fstype, farm);
+			fstree_node_set_fstype(new_mount, node->mount_ops, farm);
 	}
 
 	okay = true;
@@ -201,14 +201,14 @@ mount_farm_apply_quirks(struct mount_farm *farm)
 	if (!(node = mount_farm_add_transparent(farm, "/dev", DT_DIR, NULL)))
 		return false;
 
-	if (node->fstype == NULL)
-		fstree_node_set_fstype(node, "bind", farm);
+	if (node->mount_ops == NULL)
+		fstree_node_set_fstype(node, &mount_ops_bind, farm);
 
 	if (!mount_farm_has_mount_for(farm, "/tmp")) {
 		if (!(node = mount_farm_add_transparent(farm, "/tmp", DT_DIR, NULL)))
 			return false;
 
-		fstree_node_set_fstype(node, "tmpfs", farm);
+		fstree_node_set_fstype(node, &mount_ops_tmpfs, farm);
 	}
 
 	if (tracing_level > 0) {

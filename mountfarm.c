@@ -301,7 +301,7 @@ __mount_farm_fudge_non_directory(struct fstree_node *node, struct fstree_node *c
 
 		/* Transform this to a bind mount */
 		node->export_type = WORMHOLE_EXPORT_TRANSPARENT;
-		strutil_set(&node->fstype, "bind");
+		node->mount_ops = &mount_ops_bind;
 
 		/* Remember the layer this file comes from for later reference
 		 * when we try to mount it. */
@@ -348,7 +348,8 @@ __mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_anc
 
 	trace3("%*.*s%s(%s [%s:%s])",
 			node->depth, node->depth, "",
-			__func__, node->relative_path, mount_export_type_as_string(node->export_type), node->fstype);
+			__func__, node->relative_path, mount_export_type_as_string(node->export_type),
+			fstree_node_fstype(node));
 
 	if (node->export_type == WORMHOLE_EXPORT_HIDE)
 		return true;
@@ -446,7 +447,7 @@ __mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_anc
 	if (node->export_type != WORMHOLE_EXPORT_NONE)
 		closest_ancestor = node;
 
-	if (node->export_type == WORMHOLE_EXPORT_TRANSPARENT && node->fstype == NULL) {
+	if (node->export_type == WORMHOLE_EXPORT_TRANSPARENT && node->mount_ops == NULL) {
 		log_error("Bug/problem: someone forgot to mark %s as a bind mount", node->relative_path);
 		return false;
 	}
@@ -588,7 +589,7 @@ mount_farm_add_missing_children(struct mount_farm *farm, const char *system_path
 				goto out;
 			}
 			trace3("%s: added a bind mount for %s", __func__, child->relative_path);
-			fstree_node_set_fstype(child, "bind", farm);
+			fstree_node_set_fstype(child, &mount_ops_bind, farm);
 		}
 	}
 
@@ -602,7 +603,7 @@ out:
 static bool
 __mount_farm_mount_one(const struct fstree_node *node)
 {
-	if (node->fstype == NULL)
+	if (node->mount_ops == NULL)
 		return true;
 
 	if (!fstree_node_mount(node))

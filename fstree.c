@@ -137,14 +137,14 @@ fstree_node_new(const char *name, const char *relative_path, const struct fsroot
 inline bool
 fstree_node_is_mountpoint(const struct fstree_node *node)
 {
-	return node->fstype != NULL;
+	return node->mount_ops != NULL;
 }
 
 inline bool
 fstree_node_is_below_mountpoint(const struct fstree_node *node)
 {
 	while (node) {
-		if (node->fstype != NULL)
+		if (node->mount_ops != NULL)
 			return true;
 		node = node->parent;
 	}
@@ -202,7 +202,7 @@ fstree_node_hide(struct fstree_node *node)
 
 	trace2("Hide %s", node->relative_path);
 	node->export_type = WORMHOLE_EXPORT_HIDE;
-	strutil_drop(&node->fstype);
+	node->mount_ops = NULL;
 	for (child = node->children; child; child = child->next)
 		fstree_node_hide(child);
 }
@@ -303,12 +303,12 @@ fstree_node_zap_dirs(struct fstree_node *node)
 }
 
 bool
-fstree_node_set_fstype(struct fstree_node *node, const char *fstype, struct mount_farm *farm)
+fstree_node_set_fstype(struct fstree_node *node, mount_ops_t *mount_ops, struct mount_farm *farm)
 {
-	if (node->fstype == NULL) {
-		strutil_set(&node->fstype, fstype);
-	} else if (strcmp(node->fstype, fstype)) {
-		log_error("VFS type of %s changes from %s to %s\n", node->relative_path, node->fstype, fstype);
+	if (node->mount_ops == NULL) {
+		node->mount_ops = mount_ops;
+	} else if (node->mount_ops != mount_ops) {
+		log_error("VFS type of %s changes from %s to %s\n", node->relative_path, node->mount_ops->name, mount_ops->name);
 		return false;
 	}
 
@@ -333,7 +333,7 @@ fstree_node_invalidate(struct fstree_node *node)
 	if (node->export_type != WORMHOLE_EXPORT_ROOT)
 		node->export_type = WORMHOLE_EXPORT_NONE;
 
-	strutil_drop(&node->fstype);
+	node->mount_ops = NULL;
 
 	fstree_node_zap_dirs(node);
 	strutil_drop(&node->upper);
@@ -367,13 +367,102 @@ fstree_node_build_lowerspec(const struct fstree_node *node)
 	return result;
 }
 
-bool
-fstree_node_mount(const struct fstree_node *node)
+/*
+ * Implementation for bind mounts
+ */
+static bool
+__fstree_node_mount_bind(const struct fstree_node *node)
+{
+	const char *bind_source = node->relative_path;
+
+	if (node->bind_mount_override_layer)
+		bind_source = __pathutil_concat2(node->bind_mount_override_layer->image_path, bind_source);
+
+	trace("Bind mounting %s on %s\n", bind_source, node->relative_path);
+	if (!fsutil_isdir(bind_source)
+	 && fsutil_isdir(node->mountpoint)) {
+		trace("  Need to change %s from dir to file", node->mountpoint);
+		rmdir(node->mountpoint);
+		fsutil_makefile(node->mountpoint, 0644);
+	}
+	return fsutil_mount_bind(bind_source, node->mountpoint, true);
+}
+
+mount_ops_t	mount_ops_bind = {
+	.name		= "bind",
+	.mount		= __fstree_node_mount_bind,
+};
+
+/*
+ * Implementation for overlay mounts
+ */
+static bool
+__fstree_node_mount_overlay(const struct fstree_node *node)
 {
 	char options[3 * PATH_MAX + 100];
 	char *lowerspec;
 
-	if (node->fstype == NULL)
+	if (node->dtype >= 0 && node->dtype != DT_DIR && node->dtype != DT_REG && node->dtype != DT_LNK)
+		log_warning("%s is a %s; building an overlay will probably fail",
+				node->relative_path, fsutil_dtype_as_string(node->dtype));
+
+	if (!(lowerspec = fstree_node_build_lowerspec(node)))
+		return false;
+
+	if (!node->readonly)
+		snprintf(options, sizeof(options),
+			"userxattr,lowerdir=%s,upperdir=%s,workdir=%s",
+			lowerspec, node->upper, node->work);
+	else
+		snprintf(options, sizeof(options),
+			"userxattr,lowerdir=/%s,workdir=%s",
+			lowerspec, node->work);
+
+	trace("Mounting overlay file system on %s (options=%s)\n", node->relative_path, options);
+	if (mount("wormhole", node->mountpoint, "overlay", MS_NOATIME|MS_LAZYTIME, options) < 0) {
+		log_error("Unable to mount %s: %m\n", node->mountpoint);
+		free(lowerspec);
+		return false;
+	}
+
+	trace2("Mounted %s: %s\n", node->mountpoint, lowerspec);
+	trace3("  mount option %s", options);
+
+	free(lowerspec);
+	return true;
+}
+
+mount_ops_t	mount_ops_overlay = {
+	.name		= "overlay",
+	.mount		= __fstree_node_mount_overlay,
+};
+
+/*
+ * Implementation for mounts of virtual file systems
+ */
+static bool
+__fstree_node_mount_virtual(const struct fstree_node *node)
+{
+	const char *fstype = node->mount_ops->name;
+	const char *fsname = "wormhole";
+
+	trace("Mounting %s file system on %s\n", fstype, node->relative_path);
+	if (mount(fsname, node->mountpoint, fstype, MS_NOATIME|MS_LAZYTIME, NULL) < 0) {
+		log_error("Unable to mount %s fs on %s: %m\n", fstype, node->mountpoint);
+		return NULL;
+	}
+	return true;
+}
+
+mount_ops_t	mount_ops_tmpfs = {
+	.name		= "tmpfs",
+	.mount		= __fstree_node_mount_virtual,
+};
+
+bool
+fstree_node_mount(const struct fstree_node *node)
+{
+	if (node->mount_ops == NULL)
 		return true;
 
 	/* mount hiding - we just create the mount point but leave it unused. */
@@ -388,6 +477,9 @@ fstree_node_mount(const struct fstree_node *node)
 	if (node->parent && node->parent->export_type == WORMHOLE_EXPORT_ROOT)
 		(void) fsutil_makedirs(node->mountpoint, 0755);
 
+	return node->mount_ops->mount(node);
+
+#if 0
 	if (strcmp(node->fstype, "overlay")) {
 		const char *fsname = "wormhole";
 
@@ -443,6 +535,7 @@ fstree_node_mount(const struct fstree_node *node)
 
 	free(lowerspec);
 	return node;
+#endif
 }
 
 bool
@@ -495,7 +588,8 @@ __fstree_node_print(const struct fstree_node *node)
 
 	type = mount_export_type_as_string(node->export_type);
 	if (node->mountpoint) {
-		trace("%*.*s%s %-12s [%s mount on %s]", ws, ws, "", name, type, node->fstype, node->mountpoint);
+		trace("%*.*s%s %-12s [%s mount on %s]", ws, ws, "", name, type,
+			       fstree_node_fstype(node), node->mountpoint);
 	} else {
 		trace("%*.*s%s %s", ws, ws, "", name, type);
 	}

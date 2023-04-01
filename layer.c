@@ -584,6 +584,10 @@ wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct
 		okay = mount_config_array_add(&layer->mounts, tree->relative_path, tree->dtype,
 				MOUNT_ORIGIN_SYSTEM, MOUNT_MODE_BIND);
 	} else
+	if (tree->export_type == WORMHOLE_EXPORT_SEMITRANSPARENT) {
+		okay = mount_config_array_add(&layer->mounts, tree->relative_path, tree->dtype,
+				MOUNT_ORIGIN_SYSTEM, MOUNT_MODE_OVERLAY);
+	} else
 	if (tree->export_type != WORMHOLE_EXPORT_NONE) {
 		log_error("%s: bad export type %u at %s", __func__, tree->export_type, tree->relative_path);
 		return false;
@@ -610,10 +614,10 @@ wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm 
 			return false;
 
 		if (mnt->mode == MOUNT_MODE_OVERLAY)
-			fstree_node_set_fstype(new_mount, "overlay", farm);
+			fstree_node_set_fstype(new_mount, &mount_ops_overlay, farm);
 		else
 		if (mnt->mode == MOUNT_MODE_BIND)
-			fstree_node_set_fstype(new_mount, "bind", farm);
+			fstree_node_set_fstype(new_mount, &mount_ops_bind, farm);
 	}
 
 	return true;
