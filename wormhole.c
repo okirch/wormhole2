@@ -454,8 +454,17 @@ wormhole_context_set_build_defaults(struct wormhole_context *ctx)
 void
 wormhole_context_set_boot(struct wormhole_context *ctx, const char *name)
 {
+	char *copy = strdup(name);
+	char *options;
+
 	wormhole_context_set_purpose(ctx, PURPOSE_BOOT);
-	strutil_set(&ctx->boot_device, name);
+
+	if ((options = strchr(copy, ';')) != NULL)
+		*options++ = '\0';
+
+	strutil_set(&ctx->boot_device, copy);
+	strutil_set(&ctx->boot_options, options);
+	strutil_drop(&copy);
 }
 
 static bool
@@ -712,7 +721,7 @@ __perform_boot(struct wormhole_context *ctx)
 
 	ctx->farm = mount_farm_new("/tmp/unused");
 	if (ctx->boot_fstype) {
-		if (mount(ctx->boot_device, "/tmp/root", ctx->boot_fstype, 0, NULL) < 0) {
+		if (mount(ctx->boot_device, "/tmp/root", ctx->boot_fstype, 0, ctx->boot_options) < 0) {
 			log_error("Cannot mount %s file system on %s: %m", ctx->boot_fstype, ctx->boot_device);
 			goto out;
 		}
@@ -721,7 +730,7 @@ __perform_boot(struct wormhole_context *ctx)
 		const char **next, *fstype;
 
 		for (next = default_fstypes; (fstype = *next++) != NULL; ) {
-			if (mount(ctx->boot_device, "/tmp/root", fstype, 0, NULL) >= 0) {
+			if (mount(ctx->boot_device, "/tmp/root", fstype, 0, ctx->boot_options) >= 0) {
 				trace("Successfully mounted %s using %s", ctx->boot_device, fstype);
 				root_dir = "/tmp/root";
 				break;
