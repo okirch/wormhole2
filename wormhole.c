@@ -332,6 +332,9 @@ wormhole_context_free(struct wormhole_context *ctx)
 	strutil_drop(&ctx->build.target);
 	strutil_drop(&ctx->build.root);
 	strutil_drop(&ctx->build.bindir);
+	strutil_drop(&ctx->boot.device);
+	strutil_drop(&ctx->boot.fstype);
+	strutil_drop(&ctx->boot.options);
 	strutil_array_destroy(&ctx->build.purge_directories);
 
 	if (ctx->farm) {
@@ -462,8 +465,8 @@ wormhole_context_set_boot(struct wormhole_context *ctx, const char *name)
 	if ((options = strchr(copy, ';')) != NULL)
 		*options++ = '\0';
 
-	strutil_set(&ctx->boot_device, copy);
-	strutil_set(&ctx->boot_options, options);
+	strutil_set(&ctx->boot.device, copy);
+	strutil_set(&ctx->boot.options, options);
 	strutil_drop(&copy);
 }
 
@@ -720,9 +723,9 @@ __perform_boot(struct wormhole_context *ctx)
 		goto out;
 
 	ctx->farm = mount_farm_new("/tmp/unused");
-	if (ctx->boot_fstype) {
-		if (mount(ctx->boot_device, "/tmp/root", ctx->boot_fstype, 0, ctx->boot_options) < 0) {
-			log_error("Cannot mount %s file system on %s: %m", ctx->boot_fstype, ctx->boot_device);
+	if (ctx->boot.fstype) {
+		if (mount(ctx->boot.device, "/tmp/root", ctx->boot.fstype, 0, ctx->boot.options) < 0) {
+			log_error("Cannot mount %s file system on %s: %m", ctx->boot.fstype, ctx->boot.device);
 			goto out;
 		}
 		root_dir = "/tmp/root";
@@ -730,13 +733,13 @@ __perform_boot(struct wormhole_context *ctx)
 		const char **next, *fstype;
 
 		for (next = default_fstypes; (fstype = *next++) != NULL; ) {
-			if (mount(ctx->boot_device, "/tmp/root", fstype, 0, ctx->boot_options) >= 0) {
-				trace("Successfully mounted %s using %s", ctx->boot_device, fstype);
+			if (mount(ctx->boot.device, "/tmp/root", fstype, 0, ctx->boot.options) >= 0) {
+				trace("Successfully mounted %s using %s", ctx->boot.device, fstype);
 				root_dir = "/tmp/root";
 				break;
 			}
 
-			trace("Failed to mount %s file system on %s: %m", fstype, ctx->boot_device);
+			trace("Failed to mount %s file system on %s: %m", fstype, ctx->boot.device);
 		}
 	}
 
@@ -1064,7 +1067,7 @@ do_boot(struct wormhole_context *ctx)
 		return;
 	}
 
-	trace("Booting OS image at %s", ctx->boot_device);
+	trace("Booting OS image at %s", ctx->boot.device);
 	if (!wormhole_context_perform_in_container(ctx, __perform_boot, true))
 		return;
 

@@ -170,9 +170,11 @@ struct wormhole_context {
 	} build;
 
 	/* PURPOSE_BOOT */
-	char *			boot_device;
-	char *			boot_options;
-	char *			boot_fstype;
+	struct {
+		char *		device;
+		char *		options;
+		char *		fstype;
+	} boot;
 
 	struct mount_farm *	farm;
 
