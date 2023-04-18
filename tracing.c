@@ -76,13 +76,16 @@ __log_prefix(const char *fmt, ...)
 }
 
 static void
-__log_format(const char *fmt, va_list ap)
+__log_format(const char *prefix, const char *fmt, va_list ap)
 {
 	FILE *f = __get_logf();
 	int n;
 
 	if (fmt == NULL)
 		return;
+
+	if (prefix)
+		__log_prefix("%s: ", prefix);
 
 	vfprintf(f, fmt, ap);
 
@@ -100,7 +103,7 @@ __log_format(const char *fmt, va_list ap)
 }
 
 static void
-__log_message(int level, const char *fmt, va_list ap)
+__log_message(int level, const char *prefix, const char *fmt, va_list ap)
 {
 	if (logging_to_syslog) {
 		/* LOG_EMERG indicates that this is a fatal error (for us) */
@@ -108,22 +111,24 @@ __log_message(int level, const char *fmt, va_list ap)
 			level = LOG_ERR;
 		vsyslog(level, fmt, ap);
 	} else {
-		switch (level) {
-		case LOG_EMERG:
-			__log_prefix("Fatal error: ");
-			break;
-		case LOG_ERR:
-			__log_prefix("Error: ");
-			break;
-		case LOG_WARNING:
-			__log_prefix("Warning: ");
-			break;
-		case LOG_INFO:
-		case LOG_DEBUG:
-		default:
-			/* nothing */ ;
+		if (prefix == NULL) {
+			switch (level) {
+			case LOG_EMERG:
+				prefix = "Fatal error";
+				break;
+			case LOG_ERR:
+				prefix = "Error";
+				break;
+			case LOG_WARNING:
+				prefix = "Warning";
+				break;
+			case LOG_INFO:
+			case LOG_DEBUG:
+			default:
+				/* nothing */ ;
+			}
 		}
-		__log_format(fmt, ap);
+		__log_format(prefix, fmt, ap);
 	}
 }
 
@@ -133,7 +138,17 @@ log_debug(const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	__log_message(LOG_DEBUG, fmt, ap);
+	__log_message(LOG_DEBUG, NULL, fmt, ap);
+	va_end(ap);
+}
+
+void
+log_debug_id(const char *id, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	__log_message(LOG_DEBUG, id, fmt, ap);
 	va_end(ap);
 }
 
@@ -143,7 +158,7 @@ log_info(const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	__log_message(LOG_INFO, fmt, ap);
+	__log_message(LOG_INFO, NULL, fmt, ap);
 	va_end(ap);
 }
 
@@ -153,7 +168,7 @@ log_warning(const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	__log_message(LOG_WARNING, fmt, ap);
+	__log_message(LOG_WARNING, NULL, fmt, ap);
 	va_end(ap);
 }
 
@@ -163,7 +178,17 @@ log_error(const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	__log_message(LOG_ERR, fmt, ap);
+	__log_message(LOG_ERR, NULL, fmt, ap);
+	va_end(ap);
+}
+
+void
+log_error_id(const char *id, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	__log_message(LOG_ERR, id, fmt, ap);
 	va_end(ap);
 }
 
@@ -173,7 +198,7 @@ log_fatal(const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	__log_message(LOG_EMERG, fmt, ap);
+	__log_message(LOG_EMERG, NULL, fmt, ap);
 	va_end(ap);
 
 	exit(1);

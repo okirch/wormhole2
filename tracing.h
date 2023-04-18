@@ -55,6 +55,9 @@ extern void		log_warning(const char *fmt, ...);
 extern void		log_error(const char *fmt, ...);
 extern void		log_fatal(const char *fmt, ...);
 extern void		logging_notify_raw_tty(bool);
+extern void		log_debug_id(const char *id, const char *fmt, ...);
+extern void		log_error_id(const char *id, const char *fmt, ...);
+extern void		log_warning_id(const char *id, const char *fmt, ...);
 
 static inline void
 progress_indicate(char c)
