@@ -37,6 +37,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <wordexp.h>
+#include <stdarg.h>
 
 #include "tracing.h"
 #include "util.h"
@@ -2282,4 +2283,91 @@ strutil_mapping_add_no_override(strutil_mapping_t *map, const char *key, const c
 
 	entry = strutil_mapping_new_entry(map, key);
 	strutil_set(&entry->value, value);
+}
+
+/*
+ * dynamic string buffer
+ */
+void
+strutil_dynstr_init(struct strutil_dynstr *ds)
+{
+	memset(ds, 0, sizeof(*ds));
+}
+
+void
+strutil_dynstr_destroy(struct strutil_dynstr *ds)
+{
+	strutil_drop(&ds->_value);
+	memset(ds, 0, sizeof(*ds));
+}
+
+void
+strutil_dynstr_reserve(struct strutil_dynstr *ds, unsigned int count)
+{
+	unsigned int new_size, required;
+
+	assert(ds->_len <= ds->_size);
+
+	if (count <= ds->_size - ds->_len)
+		return;
+
+	required = ds->_len + count;
+
+	new_size = ds->_size;
+	if (new_size == 0)
+		new_size = 16;
+	while (new_size < 1024 && new_size < count)
+		new_size *= 2;
+
+	if (new_size < required)
+		new_size = (required + 1023) & ~1023;
+
+	ds->_value = realloc(ds->_value, new_size);
+	ds->_size = new_size;
+}
+
+void
+strutil_dynstr_putc(struct strutil_dynstr *ds, char cc)
+{
+	if (cc == '\0')
+		return;
+
+	strutil_dynstr_reserve(ds, 1);
+	ds->_value[ds->_len++] = cc;
+	ds->_value[ds->_len] = '\0';
+}
+
+void
+strutil_dynstr_append(struct strutil_dynstr *ds, const char *s)
+{
+	unsigned int n;
+
+	if (!s || !*s)
+		return;
+
+	n = strlen(s);
+	strutil_dynstr_reserve(ds, n);
+
+	memcpy(ds->_value + ds->_len, s, n + 1);
+	ds->_len += n;
+}
+
+void
+strutil_dynstr_appendf(struct strutil_dynstr *ds, const char *fmt, ...)
+{
+	va_list ap;
+	char *s;
+
+	va_start(ap, fmt);
+	vasprintf(&s, fmt, ap);
+	va_end(ap);
+
+	strutil_dynstr_append(ds, s);
+	free(s);
+}
+
+const char *
+strutil_dynstr_value(const struct strutil_dynstr *ds)
+{
+	return ds->_value;
 }

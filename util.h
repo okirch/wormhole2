@@ -23,6 +23,8 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <string.h>
+#include <stdio.h>
 #include <dirent.h>
 
 struct strutil_array {
@@ -207,6 +209,19 @@ extern void			strutil_array_sort(struct strutil_array *);
 extern void			strutil_array_destroy(struct strutil_array *);
 extern char *			strutil_array_join(const struct strutil_array *, const char *sepa);
 extern void			strutil_split(const char *string, const char *sepa, struct strutil_array *result);
+
+struct strutil_dynstr {
+	char *		_value;
+	unsigned int	_len, _size;
+};
+#define STRUTIL_DYNSTR_INIT	{ NULL, 0, 0 }
+
+extern void			strutil_dynstr_init(struct strutil_dynstr *);
+extern void			strutil_dynstr_destroy(struct strutil_dynstr *);
+extern void			strutil_dynstr_putc(struct strutil_dynstr *, char);
+extern void			strutil_dynstr_append(struct strutil_dynstr *, const char *);
+extern void			strutil_dynstr_appendf(struct strutil_dynstr *, const char *fmt, ...);
+extern const char *		strutil_dynstr_value(const struct strutil_dynstr *);
 
 struct pathutil_parser {
 	const char *	relative_path;
