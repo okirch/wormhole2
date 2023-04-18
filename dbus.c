@@ -2,6 +2,8 @@
 #include <stdbool.h>
 #include <assert.h>
 #include <stdarg.h>
+#include <systemd/sd-bus.h>
+#include <systemd/sd-event.h>
 
 #include "owl/endpoint.h"
 #include "owl/timers.h"
@@ -54,12 +56,15 @@ typedef struct dbus_bridge_port	dbus_bridge_port_t;
 typedef struct dbus_service_proxy dbus_service_proxy_t;
 typedef struct dbus_pending_call dbus_pending_call_t;
 typedef struct dbus_sigrec	dbus_sigrec_t;
+typedef struct dbus_call	dbus_call_t;
+typedef struct dbus_timer	dbus_timer_t;
 
 typedef const struct dbus_client_ops dbus_client_ops_t;
 
 extern bool			dbus_bridge_port_acquire_name(dbus_bridge_port_t *port, const char *name);
 extern void			dbus_bridge_port_event_name_lost(dbus_bridge_port_t *port, const char *name);
 extern void			dbus_bridge_port_event_name_acquired(dbus_bridge_port_t *port, const char *name);
+static bool			dbus_service_proxy_connect(dbus_service_proxy_t *proxy, dbus_bridge_port_t *port);
 
 typedef void			dbus_startup_fn_t(dbus_client_t *, endpoint_t *, queue_t *);
 struct dbus_startup_call {
@@ -69,6 +74,8 @@ struct dbus_startup_call {
 
 struct dbus_client {
 	char *			debug_name;
+
+	sd_bus *		h;
 
 	uint8_t			endianness;
 	int			state;
@@ -91,10 +98,27 @@ struct dbus_client {
 struct dbus_client_ops {
 	struct dbus_startup_call *startup_sequence;
 
+	void			(*connection_lost)(dbus_client_t *);
 	void			(*process_registered_names)(dbus_client_t *, const char **names, unsigned int count);
 	void			(*name_acquired)(dbus_client_t *, const char *);
 	void			(*name_lost)(dbus_client_t *, const char *);
 	void			(*name_owner_changed)(dbus_client_t *, const char *, const char *, const char *);
+};
+
+typedef int			dbus_timer_callback_fn_t(void *);
+struct dbus_timer {
+	unsigned long		initial_timeout_ms;
+	unsigned long		current_timeout_ms;
+	sd_event_source *	event_source;
+	dbus_timer_callback_fn_t *callback;
+	void *			userdata;
+};
+
+
+struct dbus_call {
+	sd_bus_message *	(*build_call)(dbus_client_t *);
+	bool			(*response)(dbus_client_t *, sd_bus_message *);
+	bool			(*error)(dbus_client_t *, const sd_bus_error *);
 };
 
 struct dbus_message {
@@ -117,6 +141,7 @@ struct dbus_message {
 };
 
 typedef void (*dbus_response_handler_t)(dbus_client_t *dbus, dbus_pending_call_t *call, const dbus_message_t *msg);
+typedef void (*dbus_signal_handler_t)(dbus_client_t *dbus, sd_bus_message *msg);
 
 struct dbus_pending_call {
 	dbus_pending_call_t *	next;
@@ -135,7 +160,7 @@ struct dbus_sigrec {
 	char *			interface;
 	char *			member;
 
-	dbus_response_handler_t	handler;
+	dbus_signal_handler_t	handler;
 };
 
 struct dbus_service_proxy {
@@ -150,6 +175,9 @@ struct dbus_bridge_port {
 	char *			name;
 	char *			bus_address;
 
+	bool			open_for_business;
+
+	dbus_timer_t *		reconnect_timer;
 	dbus_client_t *		dbus;
 	dbus_client_t *		monitor;
 
@@ -172,6 +200,7 @@ struct dbus_bridge_port {
 # define trace_message_ep(ep, fmt...) do { } while (0)
 #endif
 
+static void		dbus_client_startup(dbus_client_t *dbus);
 static void		dbus_message_free(dbus_message_t *msg);
 static void		dbus_sigrec_free(dbus_sigrec_t *sig);
 
@@ -212,15 +241,19 @@ dbus_client_free(dbus_client_t *dbus)
 {
 	dbus_sigrec_t *rec;
 
+	if (dbus->h) {
+		sd_bus_unref(dbus->h);
+		dbus->h = NULL;
+	}
+
 	while ((rec = dbus->signal_handlers) != NULL) {
 		dbus->signal_handlers = rec->next;
 		dbus_sigrec_free(rec);
 	}
 }
 
-static dbus_sigrec_t *
-dbus_sigrec_new(const char *interface_name, const char *member_name,
-		dbus_response_handler_t handler)
+static inline dbus_sigrec_t *
+dbus_sigrec_new(const char *interface_name, const char *member_name, dbus_signal_handler_t handler)
 {
 	dbus_sigrec_t *sig;
 
@@ -239,7 +272,7 @@ dbus_sigrec_free(dbus_sigrec_t *sig)
 	free(sig);
 }
 
-static bool
+static inline bool
 dbus_signal_handler_match(const dbus_sigrec_t *sig, const dbus_message_t *msg)
 {
 	if (msg->interface_name == NULL || msg->member_name == NULL)
@@ -333,7 +366,7 @@ dbus_pending_call_timeout(owl_timer_t *timer, void *user_data)
 	call->timed_out = true;
 }
 
-static void
+static inline void
 dbus_client_expect_response(dbus_client_t *dbus, dbus_message_t *msg, dbus_response_handler_t handler)
 {
 	dbus_pending_call_t *call;
@@ -353,16 +386,46 @@ dbus_client_expect_response(dbus_client_t *dbus, dbus_message_t *msg, dbus_respo
 	dbus_client_insert_call(dbus, call);
 }
 
+static int
+dbus_client_handle_signal(sd_bus_message *m, void *ptr, sd_bus_error *ret_error)
+{
+	dbus_client_t *dbus = ptr;
+	dbus_sigrec_t *sig;
+
+	for (sig = dbus->signal_handlers; sig; sig = sig->next) {
+		if (sd_bus_message_is_signal(m, sig->interface, sig->member)) {
+			// dbus_debug(dbus, "Processing signal %s.%s", sig->interface, sig->member);
+			sig->handler(dbus, m);
+		}
+	}
+	return 0;
+}
+
 static void
 dbus_client_install_signal_handler(dbus_client_t *dbus,
 		const char *interface, const char *member,
-		dbus_response_handler_t handler)
+		dbus_signal_handler_t handler)
 {
 	dbus_sigrec_t *rec;
+	int r;
+
+	if (handler == NULL)
+		return;
 
 	rec = dbus_sigrec_new(interface, member, handler);
 	rec->next = dbus->signal_handlers;
 	dbus->signal_handlers = rec;
+
+	r = sd_bus_match_signal(dbus->h, NULL,
+			NULL,			/* sender */
+			NULL,			/* object path */
+			interface,
+			member,
+			dbus_client_handle_signal,
+			dbus);
+
+	if (r > 0)
+		dbus_debug(dbus, "installed signal handler for %s.%s", interface, member);
 }
 
 static void
@@ -387,6 +450,7 @@ dbus_process_message(dbus_client_t *dbus, const dbus_message_t *msg)
 			dbus->state = STATE_STARTUP_SENDING;
 	} else
 	if (msg->msg_type == DBUS_MSG_TYPE_SIGNAL) {
+#if 0
 		dbus_sigrec_t *sig;
 
 		dbus_debug(dbus, "received signal %s.%s()", msg->interface_name, msg->member_name);
@@ -396,6 +460,7 @@ dbus_process_message(dbus_client_t *dbus, const dbus_message_t *msg)
 				sig->handler(dbus, NULL, msg);
 			}
 		}
+#endif
 	}
 }
 
@@ -442,7 +507,7 @@ dbus_message_builder_new(dbus_client_t *dbus, uint8_t msg_type, unsigned int msg
 	return msg;
 }
 
-static buffer_t *
+static inline buffer_t *
 dbus_message_build_payload(dbus_message_t *msg, size_t size_hint)
 {
 	if (msg->msg_payload == NULL)
@@ -592,7 +657,7 @@ __dbus_message_put_signature(buffer_t *bp, const char *sig)
 	 && buffer_put(bp, sig, sig_len + 1);
 }
 
-static bool
+static inline bool
 __dbus_message_put_string_array(buffer_t *bp, const char **values)
 {
 	uint32_t *len_ptr, bytes = 0;
@@ -701,7 +766,7 @@ __dbus_message_get_string(buffer_t *bp, char **var)
 	return true;
 }
 
-static bool
+static inline bool
 __dbus_message_get_string_array(buffer_t *bp, struct strutil_array *result)
 {
 	uint32_t bytes, end;
@@ -854,7 +919,7 @@ dbus_message_method_build_header(dbus_message_t *msg)
 	return true;
 }
 
-static bool
+static inline bool
 dbus_message_transmit(endpoint_t *ep, queue_t *q, dbus_message_t *msg)
 {
 	buffer_t *bp;
@@ -1044,7 +1109,7 @@ dbus_message_dissect(dbus_client_t *dbus, endpoint_t *ep, queue_t *q)
 	return msg;
 }
 
-static bool
+static inline bool
 dbus_message_verify_signature(dbus_client_t *dbus, const dbus_message_t *msg, const char *expected_signature)
 {
 	if (!msg->signature || strcmp(msg->signature, expected_signature)) {
@@ -1055,98 +1120,186 @@ dbus_message_verify_signature(dbus_client_t *dbus, const dbus_message_t *msg, co
 	return true;
 }
 
-static void
-dbus_process_hello_response(dbus_client_t *dbus, dbus_pending_call_t *call, const dbus_message_t *msg)
+#if 0
+static bool
+dbus_maybe_process_error_response(dbus_client_t *dbus, sd_bus_message *m, sd_bus_error *_err)
 {
+	const sd_bus_error *err;
+
+	if (sd_bus_message_is_method_error(m, NULL) <= 0)
+		return false;
+
+	err = sd_bus_message_get_error(m);
+	dbus_debug(dbus, "Error: %s: %s", err->name, err->message);
+
+	/* XXX should free? */
+	return true;
+}
+
+static bool
+dbus_message_get_string_array(sd_bus_message *m, struct strutil_array *result)
+{
+	char **decoded = NULL;
+	unsigned int i;
+
+	strutil_array_destroy(result);
+	if (sd_bus_message_verify_type(m, 'a', "s") < 0) {
+		log_error("Cannot process message, expected array of strings");
+		return false;
+	}
+
+	if (sd_bus_message_read_strv(m, &decoded) < 0) {
+		log_error("Failed to decode string array");
+		return false;
+	}
+
+	for (i = 0; decoded[i]; ++i)
+		;
+
+	result->count = i;
+	result->data = decoded;
+	return true;
+}
+
+
+static int
+dbus_process_hello_response(struct sd_bus_message *m, void *ptr, sd_bus_error *err)
+{
+	dbus_client_t *dbus = (dbus_client_t *) ptr;
 	char *name = NULL;
+	int r;
 
 	dbus_debug(dbus, "Processing Hello response");
+
+	if (dbus_maybe_process_error_response(dbus, m, err))
+		return -1;
+
+	if ((r = sd_bus_message_read(m, "s", &name)) < 0)
+		return r;
+	dbus_debug(dbus, "assigned DBus name is \"%s\"", name);
+	return 0;
+#if 0
 	if (!dbus_message_verify_signature(dbus, msg, "s"))
-		return;
+ 		return -1;
 
 	if (!__dbus_message_get_string(msg->msg_payload, &name))
-		return;
+		return -1;
 
 	dbus_debug(dbus, "assigned DBus name is \"%s\"", name);
 	strutil_drop(&dbus->bus_name);
 	dbus->bus_name = name;
+	return 0;
+#endif
 }
 
 static void
 dbus_queue_hello(dbus_client_t *dbus, endpoint_t *ep, queue_t *q)
 {
-	dbus_message_t *msg;
+	sd_bus_message *m;
 
-	msg = dbus_message_method_call(dbus,
+	sd_bus_message_new_method_call(dbus->h, &m,
 			"org.freedesktop.DBus",		/* destination */
 			"/org/freedesktop/DBus",	/* object path */
 			"org.freedesktop.DBus",		/* interface */
-			"Hello",			/* member */
-			NULL);				/* signature */
+			"Hello");			/* member */
 
-	dbus_message_transmit(ep, q, msg);
-
-	dbus_client_expect_response(dbus, msg, dbus_process_hello_response);
-
-	/* Do not free the message, it's now dangling off the dbus_pending_call_t */
+	sd_bus_call_async(dbus->h, NULL, m, dbus_process_hello_response, dbus, 0);
 }
 
-static void
-dbus_process_list_names_response(dbus_client_t *dbus, dbus_pending_call_t *call, const dbus_message_t *msg)
+static int
+dbus_process_list_names_response(struct sd_bus_message *m, void *ptr, sd_bus_error *err)
 {
+	dbus_client_t *dbus = (dbus_client_t *) ptr;
 	struct strutil_array names = { 0 };
 
-	log_debug("Processing ListNames response");
-	if (!dbus_message_verify_signature(dbus, msg, "as"))
-		return;
+	dbus_debug(dbus, "Processing ListNames response");
 
-	// __dbus_message_display_next(msg->msg_payload);
-	if (!__dbus_message_get_string_array(msg->msg_payload, &names)) {
-		endpoint_error(dbus->ep, "failed to unmarshal string array");
-		return;
-	}
+	if (dbus_maybe_process_error_response(dbus, m, err))
+		return -1;
 
+	if (!dbus_message_get_string_array(m, &names))
+		return -1;
+
+	dbus_debug(dbus, "received %u names", names.count);
 	if (dbus->impl.ops->process_registered_names)
 		dbus->impl.ops->process_registered_names(dbus, (const char **) names.data, names.count);
 
 	strutil_array_destroy(&names);
+	dbus_client_startup(dbus);
+	return 0;
 }
 
 static void
 dbus_queue_list_names(dbus_client_t *dbus, endpoint_t *ep, queue_t *q)
 {
-	dbus_message_t *msg;
+	sd_bus_message *m;
 
-	msg = dbus_message_method_call(dbus,
+	sd_bus_message_new_method_call(dbus->h, &m,
 			"org.freedesktop.DBus",		/* destination */
 			"/org/freedesktop/DBus",	/* object path */
 			"org.freedesktop.DBus",		/* interface */
-			"ListNames",			/* member */
-			NULL);				/* signature */
+			"ListNames");			/* member */
 
-	dbus_message_transmit(ep, q, msg);
-
-	dbus_client_expect_response(dbus, msg, dbus_process_list_names_response);
-
-	/* Do not free the message, it's now dangling off the dbus_pending_call_t */
+	sd_bus_call_async(dbus->h, NULL, m, dbus_process_list_names_response, dbus, 0);
 }
+
+static sd_bus_message *
+dbus_list_names_build_call(dbus_client_t *dbus)
+{
+	sd_bus_message *m;
+
+	sd_bus_message_new_method_call(dbus->h, &m,
+			"org.freedesktop.DBus",		/* destination */
+			"/org/freedesktop/DBus",	/* object path */
+			"org.freedesktop.DBus",		/* interface */
+			"ListNames");			/* member */
+
+	return m;
+}
+
+static bool
+dbus_list_names_response(dbus_client_t *dbus, sd_bus_message *m)
+{
+	struct strutil_array names = { 0 };
+
+	dbus_debug(dbus, "Processing ListNames response");
+	if (!dbus_message_get_string_array(m, &names))
+		return false;
+
+	dbus_debug(dbus, "received %u names", names.count);
+	if (dbus->impl.ops->process_registered_names)
+		dbus->impl.ops->process_registered_names(dbus, (const char **) names.data, names.count);
+
+	strutil_array_destroy(&names);
+	dbus_client_startup(dbus);
+	return true;
+}
+
+static dbus_call_t	list_names_call = {
+	.build_call	= dbus_list_names_build_call,
+	.response	= dbus_list_names_response,
+};
+#endif
 
 /*
  * AddMatch
  */
-static void
-dbus_process_become_monitor_response(dbus_client_t *dbus, dbus_pending_call_t *call, const dbus_message_t *msg)
+static int
+dbus_process_become_monitor_response(struct sd_bus_message *m, void *ptr, sd_bus_error *err)
 {
+	dbus_client_t *dbus = (dbus_client_t *) ptr;
+
 	dbus_debug(dbus, "Received BecomeMonitor response");
+	return 0;
 }
 
-static void
+static inline void
 dbus_queue_become_monitor(dbus_client_t *dbus, endpoint_t *ep, queue_t *q)
 {
+	sd_bus_message *m;
 	const char *matches[16];
 	unsigned int nmatches = 0;
-	dbus_message_t *msg;
-	buffer_t *payload;
+	uint32_t flags = 0;
 
 	if (dbus->impl.ops->name_owner_changed)
 		matches[nmatches++] = "type=signal,interface=org.freedesktop.DBus,member=NameOwnerChanged,eavesdrop=true";
@@ -1156,111 +1309,99 @@ dbus_queue_become_monitor(dbus_client_t *dbus, endpoint_t *ep, queue_t *q)
 		matches[nmatches++] = "type=signal,interface=org.freedesktop.DBus,member=NameLost,eavesdrop=true";
 	matches[nmatches] = NULL;
 
-	msg = dbus_message_method_call(dbus,
+	sd_bus_message_new_method_call(dbus->h, &m,
 			"org.freedesktop.DBus",		/* destination */
 			"/org/freedesktop/DBus",	/* object path */
 			"org.freedesktop.DBus.Monitoring", /* interface */
-			"BecomeMonitor",		/* member */
-			"asu");				/* signature */
+			"BecomeMonitor");		/* member */
 
-	payload = dbus_message_build_payload(msg, 2048);
-	(void) __dbus_message_put_string_array(payload, matches);
-	(void) __dbus_message_put_u32(payload, 0);
+	if (sd_bus_message_append_strv(m, (char **) matches) < 0
+	 || sd_bus_message_append_basic(m, SD_BUS_TYPE_UINT32, &flags) < 0)
+		return;
 
-	dbus_message_transmit(ep, q, msg);
-
-	dbus_client_expect_response(dbus, msg, dbus_process_become_monitor_response);
-
-	/* Do not free the message, it's now dangling off the dbus_pending_call_t */
+	sd_bus_call_async(dbus->h, NULL, m, dbus_process_become_monitor_response, dbus, 0);
 }
 
 /*
  * RequestName
  */
-static void
-dbus_process_request_name_response(dbus_client_t *dbus, dbus_pending_call_t *call, const dbus_message_t *msg)
+#if 0
+static int
+dbus_process_request_name_response(struct sd_bus_message *m, void *ptr, sd_bus_error *err)
 {
+	dbus_client_t *dbus = (dbus_client_t *) ptr;
+
 	dbus_debug(dbus, "Received RequestName response");
+
+	if (dbus_maybe_process_error_response(dbus, m, err))
+		return -1;
+
+	return 0;
 }
 
 static void
 dbus_queue_request_name(dbus_client_t *dbus, endpoint_t *ep, queue_t *q)
 {
-	dbus_message_t *msg;
-	buffer_t *payload;
+	sd_bus_message *m;
+	uint32_t flags = 0;
 
 	if (!dbus->request_name)
 		return;
 
 	dbus_debug(dbus, "RequestName(%s)", dbus->request_name);
-	msg = dbus_message_method_call(dbus,
+	sd_bus_message_new_method_call(dbus->h, &m,
 			"org.freedesktop.DBus",		/* destination */
 			"/org/freedesktop/DBus",	/* object path */
 			"org.freedesktop.DBus",		/* interface */
-			"RequestName",			/* member */
-			"su");				/* signature */
+			"RequestName");			/* member */
 
-	payload = dbus_message_build_payload(msg, 2048);
-	(void) __dbus_message_put_string(payload, dbus->request_name);
-	(void) __dbus_message_put_u32(payload, 0);
+	if (sd_bus_message_append(m, "su", dbus->request_name, flags) < 0)
+		return;
 
-	dbus_message_transmit(ep, q, msg);
-
-	dbus_client_expect_response(dbus, msg, dbus_process_request_name_response);
+	sd_bus_call_async(dbus->h, NULL, m, dbus_process_request_name_response, dbus, 0);
 }
+#endif
 
 static void
-dbus_client_handle_name_acquired_signal(dbus_client_t *dbus, dbus_pending_call_t *call, const dbus_message_t *msg)
+dbus_client_handle_name_acquired_signal(dbus_client_t *dbus, sd_bus_message *m)
 {
-	char *name = NULL;
+	const char *name = NULL;
 
-	if (!dbus_message_verify_signature(dbus, msg, "s"))
+	if (sd_bus_message_read(m, "s", &name) <= 0)
 		return;
 
-	if (!__dbus_message_get_string(msg->msg_payload, &name))
-		return;
-
+	dbus_debug(dbus, "NameAcquired: %s", name);
 	if (dbus->impl.ops->name_acquired)
 		dbus->impl.ops->name_acquired(dbus, name);
-
-	strutil_drop(&name);
 }
 
 static void
-dbus_client_handle_name_lost_signal(dbus_client_t *dbus, dbus_pending_call_t *call, const dbus_message_t *msg)
+dbus_client_handle_name_lost_signal(dbus_client_t *dbus, sd_bus_message *m)
 {
-	char *name = NULL;
+	const char *name = NULL;
 
-	if (!dbus_message_verify_signature(dbus, msg, "s"))
-		return;
-
-	if (!__dbus_message_get_string(msg->msg_payload, &name))
+	if (sd_bus_message_read(m, "s", &name) <= 0)
 		return;
 
 	if (dbus->impl.ops->name_lost)
 		dbus->impl.ops->name_lost(dbus, name);
-
-	strutil_drop(&name);
 }
 
 static void
-dbus_client_handle_name_owner_changed_signal(dbus_client_t *dbus, dbus_pending_call_t *call, const dbus_message_t *msg)
+dbus_client_handle_name_owner_changed_signal(dbus_client_t *dbus, sd_bus_message *m)
 {
-	char *name = NULL, *old_owner = NULL, *new_owner = NULL;
+	const char *name = NULL, *old_owner = NULL, *new_owner = NULL;
 
-	if (!dbus_message_verify_signature(dbus, msg, "sss"))
+	if (sd_bus_message_read(m, "sss", &name, &old_owner, &new_owner) <= 0)
 		return;
 
-	if (__dbus_message_get_string(msg->msg_payload, &name)
-	 && __dbus_message_get_string(msg->msg_payload, &old_owner)
-	 && __dbus_message_get_string(msg->msg_payload, &new_owner)) {
-		if (dbus->impl.ops->name_owner_changed)
-			dbus->impl.ops->name_owner_changed(dbus, name, old_owner, new_owner);
-	}
+	/* Ignore all owner changes for :x.y bus names */
+	if (name[0] == ':')
+		return;
 
-	strutil_drop(&name);
-	strutil_drop(&old_owner);
-	strutil_drop(&new_owner);
+	dbus_debug(dbus, "NameOwnerChanged(%s, %s, %s)", name, old_owner, new_owner);
+	if (dbus->impl.ops->name_owner_changed)
+		dbus->impl.ops->name_owner_changed(dbus, name, old_owner, new_owner);
 }
 
 static void
@@ -1485,7 +1626,7 @@ dbus_auth_receiver(void *handle)
 	return r;
 }
 
-static endpoint_t *
+static inline endpoint_t *
 dbus_create_endpoint(dbus_client_t *dbus, const char *dbus_path)
 {
 	endpoint_t *ep;
@@ -1502,31 +1643,200 @@ dbus_create_endpoint(dbus_client_t *dbus, const char *dbus_path)
 	return ep;
 }
 
+void
+dbus_client_startup(dbus_client_t *dbus)
+{
+	dbus_client_ops_t *ops = dbus->impl.ops;
+	struct dbus_startup_call *next_step = NULL;
+
+	if (ops && ops->startup_sequence)
+		next_step = &ops->startup_sequence[dbus->startup_step];
+
+	if (next_step && next_step->name) {
+		dbus_debug(dbus, "Performing step %u of startup sequence: %s", dbus->startup_step, next_step->name);
+		next_step->queue_fn(dbus, NULL, NULL);
+		dbus->state = STATE_STARTUP_AWAIT_RESPONSE;
+		dbus->startup_step += 1;
+	}
+}
+
+void
+dbus_client_disconnect(dbus_client_t *dbus)
+{
+	if (dbus->h == NULL)
+		return;
+
+	dbus_debug(dbus, "disconnecting");
+	sd_bus_unref(dbus->h);
+	dbus->h = NULL;
+}
+
+static int
+dbus_client_hangup_callback(sd_event_source *s, int fd, uint32_t revents, void *userdata)
+{
+	dbus_client_t *dbus = userdata;
+
+	dbus_debug(dbus, "%s()", __func__);
+	if (!(revents & POLLHUP))
+		return 0;
+
+	dbus_debug(dbus, "connection closed by peer");
+	dbus_client_disconnect(dbus);
+	sd_event_source_unref(s);
+	close(fd);
+
+	if (dbus->impl.ops->connection_lost)
+		dbus->impl.ops->connection_lost(dbus);
+
+	return 0;
+}
+
 bool
 dbus_client_connect(dbus_client_t *dbus, const char *dbus_path)
 {
-	dbus_client_install_signal_handler(dbus, 
+	sd_event *event;
+	int r;
+
+	if (dbus->h != NULL) {
+		log_error_id(dbus->debug_name, "already connected");
+		return false;
+	}
+
+	if (dbus_path == NULL) {
+		unsetenv("DBUS_SYSTEM_BUS_ADDRESS");
+	} else {
+		char addrstring[256];
+
+		snprintf(addrstring, sizeof(addrstring), "unix:path=%s", dbus_path);
+		setenv("DBUS_SYSTEM_BUS_ADDRESS", addrstring, 1);
+	}
+
+	if ((r = sd_bus_open_system_with_description(&dbus->h, dbus->debug_name)) < 0) {
+		dbus_debug(dbus, "sd_bus_open failed: %s", strerror(-r));
+		return false;
+	}
+
+	if (sd_event_default(&event) < 0)
+		log_fatal("Unable to create sd-event loop");
+	sd_bus_attach_event(dbus->h, event, SD_EVENT_PRIORITY_NORMAL);
+
+	{
+		int fd;
+
+		if ((fd = sd_bus_get_fd(dbus->h)) < 0)
+			log_fatal("unable to get fd of dbus client");
+
+		/* We cannot install two event handlers for the same fd. Thus, dup()
+		 * the fd and make sure dbus_client_hangup_callback() closes it */
+		fd = dup(fd);
+
+		sd_event_add_io(event, NULL, fd, EPOLLHUP, dbus_client_hangup_callback, dbus);
+	}
+
+	{
+		const char *sender = NULL;
+
+		if (sd_bus_get_unique_name(dbus->h, &sender) == 0)
+			strutil_set(&dbus->bus_name, sender);
+	}
+
+	dbus_debug(dbus, "connected to DBus broker; my bus name %s", dbus->bus_name);
+
+	if (dbus->impl.ops->name_acquired)
+		dbus_client_install_signal_handler(dbus, 
 			"org.freedesktop.DBus", "NameAcquired",
 			dbus_client_handle_name_acquired_signal);
-	dbus_client_install_signal_handler(dbus, 
+
+	if (dbus->impl.ops->name_lost)
+		dbus_client_install_signal_handler(dbus, 
 			"org.freedesktop.DBus", "NameLost",
 			dbus_client_handle_name_lost_signal);
-	dbus_client_install_signal_handler(dbus, 
+
+	if (dbus->impl.ops->name_owner_changed)
+		dbus_client_install_signal_handler(dbus, 
 			"org.freedesktop.DBus", "NameOwnerChanged",
 			dbus_client_handle_name_owner_changed_signal);
 
-	if (!(dbus->ep = dbus_create_endpoint(dbus, dbus_path)))
-		return false;
-
+	dbus_client_startup(dbus);
 	return true;
+}
+
+/*
+ * Timers
+ */
+static int
+__dbus_timer_callback(sd_event_source *s, uint64_t usec, void *userdata)
+{
+	static const unsigned long max_backoff = 30000000; /* 30 seconds */
+	dbus_timer_t *timer = userdata;
+
+	if (!timer->callback(timer->userdata)) {
+		sd_event_source_set_enabled(timer->event_source, SD_EVENT_OFF);
+		return 0;
+	}
+
+	if (timer->current_timeout_ms == 0) {
+		timer->current_timeout_ms = timer->initial_timeout_ms;
+	} else {
+		timer->current_timeout_ms <<= 1;
+		if (timer->current_timeout_ms > max_backoff)
+			timer->current_timeout_ms = max_backoff;
+	}
+
+	/* Come back after the specified timeout */
+	sd_event_source_set_time_relative(timer->event_source, timer->current_timeout_ms);
+	return 1;
+}
+
+
+static dbus_timer_t *
+dbus_timer_new(unsigned long timeout_ms, dbus_timer_callback_fn_t *callback, void *userdata)
+{
+	dbus_timer_t *timer;
+	sd_event *event;
+
+	timer = calloc(1, sizeof(*timer));
+	timer->initial_timeout_ms = timeout_ms;
+	timer->callback = callback;
+	timer->userdata = userdata;
+
+	if (sd_event_default(&event) < 0)
+		log_fatal("sd_event_default failed");
+
+	sd_event_add_time_relative(event, &timer->event_source, CLOCK_MONOTONIC, 0, timeout_ms / 10, __dbus_timer_callback, timer);
+	sd_event_source_set_enabled(timer->event_source, SD_EVENT_ON);
+	return timer;
+}
+
+static void
+dbus_timer_restart(dbus_timer_t *timer)
+{
+	assert(timer->event_source);
+
+	/* re-enable the timer and ensure it fires immediately */
+	sd_event_source_set_enabled(timer->event_source, SD_EVENT_ON);
+	sd_event_source_set_time_relative(timer->event_source, 0);
+	timer->current_timeout_ms = 0;
+}
+
+/*
+ * Create a timer connected to a bridge port
+ */
+static void
+dbus_bridge_add_timer(dbus_bridge_port_t *port, unsigned long timeout_ms, int (*callback)(dbus_bridge_port_t *))
+{
+	if (port->reconnect_timer == NULL)
+		port->reconnect_timer = dbus_timer_new(timeout_ms, (dbus_timer_callback_fn_t *) callback, port);
+	else
+		dbus_timer_restart(port->reconnect_timer);
 }
 
 /*
  * Implementation of the bridge port
  */
 static struct dbus_startup_call	dbus_bridge_startup_sequence[] = {
-	{ "Hello",		dbus_queue_hello	},
-	{ "ListNames",		dbus_queue_list_names	},
+//	{ "Hello",		dbus_queue_hello	},
+//	{ "ListNames",		dbus_queue_list_names	},
 
 	{ NULL, }
 };
@@ -1573,12 +1883,70 @@ static dbus_client_ops_t	dbus_impl_bridge = {
  * Implementation of the monitor
  */
 static struct dbus_startup_call	dbus_monitor_startup_sequence[] = {
-	{ "Hello",		dbus_queue_hello	},
-	{ "ListNames",		dbus_queue_list_names	},
-	{ "BecomeMonitor",	dbus_queue_become_monitor },
+//	{ "Hello",		dbus_queue_hello	},
+//	{ "ListNames",		dbus_queue_list_names	},
+//	{ "BecomeMonitor",	dbus_queue_become_monitor },
 
 	{ NULL }
 };
+
+static int
+__dbus_monitor_reconnect(dbus_bridge_port_t *port)
+{
+	dbus_client_t *dbus = port->monitor;
+	dbus_service_proxy_t *proxy;
+
+	dbus_debug(dbus, "Trying to reconnect");
+	if (dbus->h == NULL && !dbus_client_connect(dbus, port->bus_address)) {
+		return 1;
+	}
+
+	dbus_debug(dbus, "Connected, opening up for business");
+	port->open_for_business = true;
+
+	/* Loop over all proxies and reconnect those as well. */
+	for (proxy = port->service_proxies; proxy; proxy = proxy->next) {
+		if (proxy->dbus && !proxy->dbus->h)
+			dbus_service_proxy_connect(proxy, port);
+	}
+
+	return 0;
+}
+
+static void
+dbus_monitor_attempt_reconnect(dbus_bridge_port_t *port)
+{
+	dbus_client_t *dbus = port->monitor;
+
+	if (dbus->h) {
+		dbus_debug(dbus, "%s: already connected", __func__);
+		return;
+	}
+
+	dbus_bridge_add_timer(port, 1000000, __dbus_monitor_reconnect);
+}
+
+
+static void
+dbus_monitor_connection_lost(dbus_client_t *dbus)
+{
+	dbus_bridge_port_t *port = dbus->impl.data;
+	dbus_service_proxy_t *proxy;
+
+	/* can this happen? */
+	if (dbus != port->monitor)
+		return;
+
+	dbus_debug(dbus, "lost connection to DBus broker");
+	port->open_for_business = false;
+
+	for (proxy = port->service_proxies; proxy; proxy = proxy->next) {
+		if (proxy->dbus)
+			dbus_client_disconnect(proxy->dbus);
+	}
+
+	dbus_monitor_attempt_reconnect(port);
+}
 
 static void
 dbus_monitor_name_owner_changed(dbus_client_t *dbus, const char *name, const char *old_owner, const char *new_owner)
@@ -1598,6 +1966,7 @@ dbus_monitor_name_owner_changed(dbus_client_t *dbus, const char *name, const cha
 
 static dbus_client_ops_t	dbus_impl_monitor = {
 	.startup_sequence = dbus_monitor_startup_sequence,
+	.connection_lost = dbus_monitor_connection_lost,
 	.name_owner_changed = dbus_monitor_name_owner_changed,
 	.process_registered_names = dbus_bridge_process_registered_names,
 };
@@ -1606,14 +1975,53 @@ static dbus_client_ops_t	dbus_impl_monitor = {
  * DBus methods for proxy
  */
 static struct dbus_startup_call	dbus_proxy_startup_sequence[] = {
-	{ "Hello",		dbus_queue_hello	},
-	{ "RequestName",	dbus_queue_request_name },
+//	{ "Hello",		dbus_queue_hello	},
+//	{ "RequestName",	dbus_queue_request_name },
 
 	{ NULL }
 };
 
+static void
+dbus_proxy_connection_lost(dbus_client_t *dbus)
+{
+	dbus_bridge_port_t *port = dbus->impl.data;
+	dbus_service_proxy_t *proxy;
+
+	for (proxy = port->service_proxies; proxy; proxy = proxy->next) {
+		if (dbus == proxy->dbus) {
+			log_debug_id(port->name, "proxy %s lost connection", proxy->name);
+		}
+	}
+}
+
+static int
+__dbus_service_proxy_process_incoming(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
+{
+	dbus_service_proxy_t *proxy = userdata;
+	uint8_t msg_type;
+
+	log_debug("%s()", __func__);
+	if (sd_bus_message_get_type(m, &msg_type) < 0)
+		return 0;
+
+	log_debug("  msg type=%u", msg_type);
+	switch (msg_type) {
+	case SD_BUS_MESSAGE_METHOD_CALL:
+	case SD_BUS_MESSAGE_SIGNAL:
+		break;
+
+	case SD_BUS_MESSAGE_METHOD_RETURN:
+	case SD_BUS_MESSAGE_METHOD_ERROR:
+	default:
+		return 0;
+	}
+
+	return 0;
+}
+
 static dbus_client_ops_t	dbus_impl_proxy = {
 	.startup_sequence = dbus_proxy_startup_sequence,
+	.connection_lost = dbus_proxy_connection_lost,
 };
 
 /*
@@ -1635,25 +2043,51 @@ dbus_service_proxy_connect(dbus_service_proxy_t *proxy, dbus_bridge_port_t *port
 {
 	dbus_client_t *dbus;
 	char name[128];
+	int r;
+
+	if (proxy->dbus && proxy->dbus->h) {
+		dbus_debug(proxy->dbus, "already connected");
+		return true;
+	}
 
 	if (port->bus_address == NULL) {
 		log_error("%s: cannot create proxy %s: no bus address set", port->name, proxy->name);
 		return false;
 	}
 
-	/* Create the dbus client and connect, claiming the name we've been given */
-	snprintf(name, sizeof(name), "%s:%s", port->name, proxy->name);
-	dbus = dbus_client_new(name, &dbus_impl_proxy, port);
+	if (proxy->dbus == NULL) {
+		/* Create the dbus client and connect, claiming the name we've been given */
+		snprintf(name, sizeof(name), "%s:%s", port->name, proxy->name);
+		dbus = dbus_client_new(name, &dbus_impl_proxy, port);
+		proxy->dbus = dbus;
 
-	strutil_set(&dbus->request_name, proxy->name);
-	log_debug("request_name=%s", dbus->request_name);
+		strutil_set(&dbus->request_name, proxy->name);
+	} else {
+		dbus = proxy->dbus;
+	}
 
+	if (!port->open_for_business) {
+		dbus_debug(dbus, "Defer connect() call until the downstream bus broker is running");
+		return true;
+	} else
 	if (!dbus_client_connect(dbus, port->bus_address)) {
-		/* dbus_client_free(dbus); */
+		log_error_id(dbus->debug_name, "Failed to connect to DBus");
+		/* mark this proxy as failed */
 		return false;
 	}
 
-	proxy->dbus = dbus;
+	r = sd_bus_request_name(dbus->h, dbus->request_name, 0);
+	if (r < 0) {
+		log_error("Failed to acquire bus name %s on %s port: %s",
+				dbus->request_name, port->name, strerror(-r));
+		/* mark this proxy as failed */
+		return false;
+	}
+
+	dbus_debug(dbus, "Acquired name %s", dbus->request_name);
+
+	sd_bus_add_filter(dbus->h, NULL, __dbus_service_proxy_process_incoming, proxy);
+
 	return true;
 }
 
@@ -1678,15 +2112,23 @@ dbus_bridge_port_publish(dbus_bridge_port_t *port, const char *name)
 }
 
 bool
-dbus_bridge_port_monitor(dbus_bridge_port_t *port)
+dbus_bridge_port_monitor(dbus_bridge_port_t *port, bool deferred)
 {
 	char name[64];
 
 	snprintf(name, sizeof(name), "%s-mon", port->name);
+	log_debug("Creating port monitor for port %s", port->name);
+
 	port->monitor = dbus_client_new(name, &dbus_impl_monitor, port);
-	if (!dbus_client_connect(port->monitor, port->bus_address)) {
-		log_error("Unable to create dbus monitor\n");
-		return false;
+	if (deferred) {
+		dbus_monitor_attempt_reconnect(port);
+	} else {
+		if (!dbus_client_connect(port->monitor, port->bus_address)) {
+			log_error("Unable to create dbus monitor\n");
+			return false;
+		}
+
+		port->open_for_business = true;
 	}
 
 	return true;
@@ -1702,6 +2144,41 @@ dbus_bridge_port_connect(dbus_bridge_port_t *port)
 	if (!dbus_client_connect(port->dbus, port->bus_address)) {
 		log_error("Unable to create dbus bridge port\n");
 		return false;
+	}
+
+	port->open_for_business = true;
+	return true;
+}
+
+bool
+dbus_bridge_port_list_names(dbus_bridge_port_t *port)
+{
+	dbus_client_t *dbus = port->monitor;
+	char **registered = NULL;
+	int r;
+
+	if (!dbus || !dbus->h) {
+		log_debug_id(port->name, "%s: not connected", __func__);
+		return false;
+	}
+
+	r = sd_bus_list_names(dbus->h, &registered, NULL);
+	if (r >= 0) {
+		unsigned int count;
+
+		for (count = 0; registered[count]; ++count)
+			;
+
+		dbus_debug(dbus, "Found %u registered names", count);
+		dbus_bridge_process_registered_names(dbus, (const char **) registered, count);
+
+		{
+			char **p;
+
+			for (p = registered; *p; ++p)
+				free(*p);
+			free(registered);
+		}
 	}
 
 	return true;
@@ -1722,8 +2199,12 @@ dbus_bridge_port_acquire_name(dbus_bridge_port_t *port, const char *name)
 	if (proxy == NULL)
 		*pos = proxy = dbus_service_proxy_new(name, port->bus_address);
 
-	if (!proxy->dbus && !dbus_service_proxy_connect(proxy, port)) {
-		log_error("Unable to establish a proxy %s connection for %s", port->name, proxy->name);
+	if (!dbus_service_proxy_connect(proxy, port)) {
+		log_error("Unable to establish a %s proxy connection for %s", port->name, proxy->name);
+
+		if (proxy->dbus)
+			dbus_client_disconnect(proxy->dbus);
+
 		return false;
 	}
 
@@ -1770,10 +2251,14 @@ int
 main(int argc, char **argv)
 {
 	dbus_bridge_port_t *port_upstream, *port_downstream;
+	sd_event *event = NULL;
 
 	tracing_set_level(1);
 
-	port_upstream = dbus_bridge_port_new("upstream", DBUS_SYSTEM_BUS_SOCKET);
+	if (sd_event_default(&event) < 0)
+		log_fatal("Unable to create sd-event loop");
+
+	port_upstream = dbus_bridge_port_new("upstream", NULL);
 	port_downstream = dbus_bridge_port_new("downstream", "/tmp/downstream");
 	port_upstream->other = port_downstream;
 	port_downstream->other = port_upstream;
@@ -1782,20 +2267,22 @@ main(int argc, char **argv)
 #if 0
 	dbus_bridge_port_publish(port_upstream, "org.fedoraproject.FirewallD1");
 	dbus_bridge_port_publish(port_upstream, "net.hadess.PowerProfiles");
-	dbus_bridge_port_publish(port_upstream, "com.intel.tss2.Tabrmd");
 #endif
+	dbus_bridge_port_publish(port_upstream, "com.intel.tss2.Tabrmd");
 
 	if (1) {
-		if (!dbus_bridge_port_monitor(port_upstream))
+		if (!dbus_bridge_port_monitor(port_downstream, true))
 			return 1;
 	}
 
-	if (0) {
-		if (!dbus_bridge_port_connect(port_upstream))
+	if (1) {
+		if (!dbus_bridge_port_monitor(port_upstream, false))
 			return 1;
+
+		dbus_bridge_port_list_names(port_upstream);
 	}
 
-        io_mainloop(-1);
+	sd_event_loop(event);
 	return 0;
 }
 

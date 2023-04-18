@@ -17,7 +17,7 @@ WORMHOLE_SRCS	= wormhole.c
 WORMHOLE_OBJS	= $(WORMHOLE_SRCS:.c=.o)
 
 LIBDEPS		= $(LIBWORMHOLE) $(LIBOWL)
-LINK		= -L. -lowl -lwormhole -lutil
+LINK		= -L. -lowl -lsystemd -lwormhole -lutil
 
 IMGDELTA	= imgdelta
 IMGDELTA_SRCS	= imgdelta.c
