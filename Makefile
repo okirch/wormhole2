@@ -11,25 +11,43 @@ MAN8DIR		= /usr/share/man/man8
 VARLIBDIR	= /var/lib/wormhole
 
 COPT		= -g
-CFLAGS		= -Wall -D_GNU_SOURCE $(COPT) -Wformat-truncation=0
+CFLAGS		= -Wall -D_GNU_SOURCE $(COPT) -Wformat-truncation=0 -I.
 WORMHOLE	= wormhole
 WORMHOLE_SRCS	= wormhole.c
 WORMHOLE_OBJS	= $(WORMHOLE_SRCS:.c=.o)
-LINK		= -L. -lwormhole -lutil
+
+LIBDEPS		= $(LIBWORMHOLE) $(LIBOWL)
+LINK		= -L. -lowl -lwormhole -lutil
 
 IMGDELTA	= imgdelta
 IMGDELTA_SRCS	= imgdelta.c
 IMGDELTA_OBJS	= $(IMGDELTA_SRCS:.c=.o)
 
-LIB		= libwormhole.a
-LIB_SRCS	= \
+DBUSRELAY	= dbus-relay
+DBUSRELAY_SRCS	= dbus.c
+DBUSRELAY_OBJS	= $(DBUSRELAY_SRCS:.c=.o)
+
+LIBWORMHOLE	= libwormhole.a
+LIBWH_SRCS	= \
 		  layer.c \
 		  mountfarm.c \
 		  fstree.c \
 		  mntent2.c \
 		  tracing.c \
 		  util.c
-LIB_OBJS	= $(LIB_SRCS:.c=.o)
+LIBWH_OBJS	= $(LIBWH_SRCS:.c=.o)
+
+LIBOWL		= libowl.a
+_LIBOWL_SRCS	= \
+		  mainloop.c \
+		  bufparser.c \
+		  queue.c \
+		  endpoint.c \
+		  timers.c \
+		  socket.c
+LIBOWL_SRCS	= $(addprefix $(LIBOWL_SRCDIR)/,$(_LIBOWL_SRCS))
+LIBOWL_OBJS	= $(LIBOWL_SRCS:.c=.o)
+LIBOWL_SRCDIR	= owl
 
 _MAN1PAGES	= wormhole.1 \
 		  wormhole-digger.1 \
@@ -37,13 +55,14 @@ _MAN1PAGES	= wormhole.1 \
 _MAN5PAGES	= wormhole.conf.5
 _MAN8PAGES	= wormholed.8
 
-all: $(WORMHOLE) $(IMGDELTA)
+all: $(WORMHOLE) $(IMGDELTA) $(DBUSRELAY)
 
 clean:
-	rm -f $(WORMHOLE)
+	rm -f $(WORMHOLE) $(LIBWORMHOLE) $(LIBOWL)
 	rm -f *.o *.a
+	rm -f $(LIBOWL_SRCDIR)/*.o
 
-install: $(WORMHOLE)
+install: $(WORMHOLE) $(IMGDELTA) $(DBUSRELAY)
 	@case "$(DESTDIR)" in \
 	""|/*) ;; \
 	*) echo "DESTDIR is a relative path, no workie" >&2; exit 2;; \
@@ -51,6 +70,7 @@ install: $(WORMHOLE)
 	install -m 755 -d $(DESTDIR)$(BINDIR)
 	install -m 555 -s $(WORMHOLE) $(DESTDIR)$(BINDIR)
 	install -m 555 -s $(IMGDELTA) $(DESTDIR)$(BINDIR)
+	install -m 555 -s $(DBUSRELAY) $(DESTDIR)$(BINDIR)
 ifneq ($(MAN1PAGES),)
 	install -m 755 -d $(DESTDIR)$(MAN1DIR)
 	install -m 444 $(MAN1PAGES) $(DESTDIR)$(MAN1DIR)
@@ -64,14 +84,20 @@ ifneq ($(MAN8PAGES),)
 	install -m 444 $(MAN8PAGES) $(DESTDIR)$(MAN8DIR)
 endif
 
-$(WORMHOLE): $(WORMHOLE_OBJS) $(LIB)
+$(WORMHOLE): $(WORMHOLE_OBJS) $(LIBDEPS)
 	$(CC) $(CFLAGS) -o $@ $(WORMHOLE_OBJS) $(LINK)
 
-$(IMGDELTA): $(IMGDELTA_OBJS) $(LIB)
+$(IMGDELTA): $(IMGDELTA_OBJS) $(LIBDEPS)
 	$(CC) $(CFLAGS) -o $@ $(IMGDELTA_OBJS) $(LINK)
 
-$(LIB): $(LIB_OBJS)
-	$(AR) crv $@  $(LIB_OBJS)
+$(DBUSRELAY): $(DBUSRELAY_OBJS) $(LIBDEPS)
+	$(CC) $(CFLAGS) -o $@ $(DBUSRELAY_OBJS) $(LINK)
+
+$(LIBWORMHOLE): $(LIBWH_OBJS)
+	$(AR) crv $@  $(LIBWH_OBJS)
+
+$(LIBOWL): $(LIBOWL_OBJS)
+	$(AR) crv $@  $(LIBOWL_OBJS)
 
 ifeq ($(wildcard .depend), .depend)
 include .depend
@@ -79,6 +105,7 @@ endif
 
 depend:
 	gcc $(CFLAGS) -MM *.c >.depend
+	gcc $(CFLAGS) -MM owl/*.c | sed 's:^[a-z]:owl/&:' >>.depend
 
 dist:
 	mkdir wormhole-$(VERSION)
