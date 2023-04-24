@@ -45,6 +45,22 @@ queue_entry_free(queue_entry_t *qe)
 	free(qe);
 }
 
+queue_t *
+queue_alloc(void)
+{
+	queue_t *q;
+
+	q = calloc(1, sizeof(*q));
+	return q;
+}
+
+void
+queue_free(queue_t *q)
+{
+	queue_destroy(q);
+	free(q);
+}
+
 void
 queue_init(queue_t *q)
 {
@@ -341,6 +357,17 @@ queue_transfer(queue_t *dstq, queue_t *srcq, size_t count)
 
         queue_append(dstq, data, count);
 	return true;
+}
+
+bool
+queue_transfer_buffer(queue_t *dstq, buffer_t *bp)
+{
+	bool ok;
+
+	/* FIXME: insert rather than copy */
+	ok = queue_append(dstq, buffer_read_pointer(bp), buffer_available(bp));
+	buffer_free(bp);
+	return ok;
 }
 
 bool

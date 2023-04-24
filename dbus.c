@@ -1,3 +1,25 @@
+/*
+ * DBus relay manager
+ *
+ *   Copyright (C) 2023 Olaf Kirch <okir@suse.de>
+ *
+ *   This program is free software; you can redistribute it and/or modify
+ *   it under the terms of the GNU General Public License as published by
+ *   the Free Software Foundation; either version 2 of the License, or
+ *   (at your option) any later version.
+ *
+ *   This program is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *   GNU General Public License for more details.
+ *
+ *   You should have received a copy of the GNU General Public License
+ *   along with this program; if not, write to the Free Software
+ *   Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ *
+ * This takes care of spawning the appropriate forwarding processes.
+ */
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <assert.h>
@@ -7,6 +29,7 @@
 
 #include "owl/endpoint.h"
 #include "owl/timers.h"
+#include "dbus-relay.h"
 
 #define DBUS_SYSTEM_BUS_SOCKET	"/run/dbus/system_bus_socket"
 
@@ -65,6 +88,8 @@ extern bool			dbus_bridge_port_acquire_name(dbus_bridge_port_t *port, const char
 extern void			dbus_bridge_port_event_name_lost(dbus_bridge_port_t *port, const char *name);
 extern void			dbus_bridge_port_event_name_acquired(dbus_bridge_port_t *port, const char *name);
 static bool			dbus_service_proxy_connect(dbus_service_proxy_t *proxy, dbus_bridge_port_t *port);
+
+static void			dbus_service_proxy_stop(dbus_service_proxy_t *proxy);
 
 typedef void			dbus_startup_fn_t(dbus_client_t *, endpoint_t *, queue_t *);
 struct dbus_startup_call {
@@ -168,7 +193,7 @@ struct dbus_service_proxy {
 	char *			bus_address;
 
 	char *			name;
-	dbus_client_t *		dbus;
+	pid_t			pid;
 };
 
 struct dbus_bridge_port {
@@ -242,6 +267,7 @@ dbus_client_free(dbus_client_t *dbus)
 	dbus_sigrec_t *rec;
 
 	if (dbus->h) {
+		sd_bus_close(dbus->h);
 		sd_bus_unref(dbus->h);
 		dbus->h = NULL;
 	}
@@ -1906,7 +1932,7 @@ __dbus_monitor_reconnect(dbus_bridge_port_t *port)
 
 	/* Loop over all proxies and reconnect those as well. */
 	for (proxy = port->service_proxies; proxy; proxy = proxy->next) {
-		if (proxy->dbus && !proxy->dbus->h)
+		if (proxy->pid < 0)
 			dbus_service_proxy_connect(proxy, port);
 	}
 
@@ -1940,10 +1966,8 @@ dbus_monitor_connection_lost(dbus_client_t *dbus)
 	dbus_debug(dbus, "lost connection to DBus broker");
 	port->open_for_business = false;
 
-	for (proxy = port->service_proxies; proxy; proxy = proxy->next) {
-		if (proxy->dbus)
-			dbus_client_disconnect(proxy->dbus);
-	}
+	for (proxy = port->service_proxies; proxy; proxy = proxy->next)
+		dbus_service_proxy_stop(proxy);
 
 	dbus_monitor_attempt_reconnect(port);
 }
@@ -1981,23 +2005,10 @@ static struct dbus_startup_call	dbus_proxy_startup_sequence[] = {
 	{ NULL }
 };
 
-static void
-dbus_proxy_connection_lost(dbus_client_t *dbus)
-{
-	dbus_bridge_port_t *port = dbus->impl.data;
-	dbus_service_proxy_t *proxy;
-
-	for (proxy = port->service_proxies; proxy; proxy = proxy->next) {
-		if (dbus == proxy->dbus) {
-			log_debug_id(port->name, "proxy %s lost connection", proxy->name);
-		}
-	}
-}
-
+#if 0
 static int
 __dbus_service_proxy_process_incoming(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
 {
-	dbus_service_proxy_t *proxy = userdata;
 	uint8_t msg_type;
 
 	log_debug("%s()", __func__);
@@ -2018,10 +2029,10 @@ __dbus_service_proxy_process_incoming(sd_bus_message *m, void *userdata, sd_bus_
 
 	return 0;
 }
+#endif
 
 static dbus_client_ops_t	dbus_impl_proxy = {
 	.startup_sequence = dbus_proxy_startup_sequence,
-	.connection_lost = dbus_proxy_connection_lost,
 };
 
 /*
@@ -2035,60 +2046,174 @@ dbus_service_proxy_new(const char *name, const char *bus_address)
 	proxy = calloc(1, sizeof(*proxy));
 	strutil_set(&proxy->name, name);
 	strutil_set(&proxy->bus_address, bus_address);
+	proxy->pid = -1;
 	return proxy;
 }
 
+static void
+__dbus_service_proxy_configure_port(dbus_forwarding_port_t *port, const char *bus_name, int fd)
+{
+	dbus_forwarding_port_set_bus_name(port, bus_name);
+	dbus_forwarding_port_set_socket(port, fd);
+}
+
 static bool
-dbus_service_proxy_connect(dbus_service_proxy_t *proxy, dbus_bridge_port_t *port)
+dbus_service_proxy_start(dbus_service_proxy_t *proxy, dbus_client_t *dbus_upstream, dbus_client_t *dbus_downstream)
+{
+	dbus_forwarder_t *fwd;
+	int upstream_fd, downstream_fd;
+	pid_t pid;
+
+	if (proxy->pid > 0) {
+		log_error_id(proxy->name, "we already have an active proxy process");
+		return false;
+	}
+
+	/* libsystemd is a bit overly restrictive here. Calling sd_bus_get_fd() after fork
+	 * will return -ECHILD :-/
+	 */
+	upstream_fd = dup(sd_bus_get_fd(dbus_upstream->h));
+	downstream_fd = dup(sd_bus_get_fd(dbus_downstream->h));
+
+	pid = fork();
+	if (pid < 0) {
+		log_error_id(proxy->name, "unable to fork proxy process: %m");
+		return false;
+	}
+
+	if (pid > 0) {
+		proxy->pid = pid;
+		return true;
+	}
+
+	/* we're the child process */
+	fwd = dbus_forwarder_new(proxy->name);
+
+	dbus_debug(dbus_upstream, "Configuring upstream port");
+	__dbus_service_proxy_configure_port(dbus_forwarder_get_upstream(fwd), dbus_upstream->bus_name, upstream_fd);
+	dbus_debug(dbus_downstream, "Configuring downstream port");
+	__dbus_service_proxy_configure_port(dbus_forwarder_get_downstream(fwd), dbus_downstream->bus_name, downstream_fd);
+
+	dbus_forwarder_eventloop(fwd);
+
+	exit(0);
+}
+
+static void
+dbus_service_proxy_stop(dbus_service_proxy_t *proxy)
+{
+	if (proxy->pid <= 0)
+		return;
+
+	kill(proxy->pid, SIGKILL);
+	if (!procutil_wait_for(proxy->pid, NULL))
+		log_error_id(proxy->name, "unable to reap proxy process");
+
+	proxy->pid = -1;
+}
+
+static dbus_client_t *
+dbus_service_proxy_create_client(dbus_service_proxy_t *proxy, dbus_bridge_port_t *port)
 {
 	dbus_client_t *dbus;
 	char name[128];
+
+	if (!port || !port->open_for_business)
+		return NULL;
+
+	/* Create the dbus client and connect, claiming the name we've been given */
+	snprintf(name, sizeof(name), "%s:%s", port->name, proxy->name);
+	dbus = dbus_client_new(name, &dbus_impl_proxy, port);
+	strutil_set(&dbus->request_name, proxy->name);
+
+	return dbus;
+}
+
+static dbus_client_t *
+dbus_service_proxy_connect_downstream(dbus_service_proxy_t *proxy, dbus_bridge_port_t *port)
+{
+	dbus_client_t *dbus;
 	int r;
 
-	if (proxy->dbus && proxy->dbus->h) {
-		dbus_debug(proxy->dbus, "already connected");
-		return true;
-	}
+	if (!(dbus = dbus_service_proxy_create_client(proxy, port)))
+		return NULL;
 
-	if (port->bus_address == NULL) {
-		log_error("%s: cannot create proxy %s: no bus address set", port->name, proxy->name);
-		return false;
-	}
-
-	if (proxy->dbus == NULL) {
-		/* Create the dbus client and connect, claiming the name we've been given */
-		snprintf(name, sizeof(name), "%s:%s", port->name, proxy->name);
-		dbus = dbus_client_new(name, &dbus_impl_proxy, port);
-		proxy->dbus = dbus;
-
-		strutil_set(&dbus->request_name, proxy->name);
-	} else {
-		dbus = proxy->dbus;
-	}
-
-	if (!port->open_for_business) {
-		dbus_debug(dbus, "Defer connect() call until the downstream bus broker is running");
-		return true;
-	} else
 	if (!dbus_client_connect(dbus, port->bus_address)) {
 		log_error_id(dbus->debug_name, "Failed to connect to DBus");
-		/* mark this proxy as failed */
-		return false;
+		goto failed;
 	}
 
 	r = sd_bus_request_name(dbus->h, dbus->request_name, 0);
 	if (r < 0) {
 		log_error("Failed to acquire bus name %s on %s port: %s",
 				dbus->request_name, port->name, strerror(-r));
-		/* mark this proxy as failed */
-		return false;
+		goto failed;
 	}
 
 	dbus_debug(dbus, "Acquired name %s", dbus->request_name);
+	return dbus;
 
-	sd_bus_add_filter(dbus->h, NULL, __dbus_service_proxy_process_incoming, proxy);
+failed:
+	dbus_client_free(dbus);
+	return NULL;
+}
 
-	return true;
+static dbus_client_t *
+dbus_service_proxy_connect_upstream(dbus_service_proxy_t *proxy, dbus_bridge_port_t *port)
+{
+	dbus_client_t *dbus;
+
+	if (!(dbus = dbus_service_proxy_create_client(proxy, port)))
+		return NULL;
+
+	if (!dbus_client_connect(dbus, port->bus_address)) {
+		log_error_id(dbus->debug_name, "Failed to connect to DBus");
+		goto failed;
+	}
+
+	return dbus;
+
+failed:
+	dbus_client_free(dbus);
+	return NULL;
+}
+
+static bool
+dbus_service_proxy_connect(dbus_service_proxy_t *proxy, dbus_bridge_port_t *port)
+{
+	dbus_client_t *dbus_upstream, *dbus_downstream;
+	bool ok = false;
+
+	if (port->bus_address == NULL) {
+		log_error("%s: cannot create proxy %s: no bus address set", port->name, proxy->name);
+		return false;
+	}
+
+	if (!port->open_for_business) {
+		log_debug_id(proxy->name, "Defer connect() call until the downstream bus broker is running");
+		return true;
+	}
+
+	/* If a child process exists already, terminate it */
+	(void) dbus_service_proxy_stop(proxy);
+
+	log_debug("Trying to create a proxy for %s on port %s", proxy->name, port->name);
+	dbus_upstream = dbus_service_proxy_connect_upstream(proxy, port->other);
+	dbus_downstream = dbus_service_proxy_connect_downstream(proxy, port);
+	if (dbus_upstream && dbus_downstream)
+		ok = dbus_service_proxy_start(proxy, dbus_upstream, dbus_downstream);
+
+	if (dbus_upstream)
+		dbus_client_free(dbus_upstream);
+	if (dbus_downstream)
+		dbus_client_free(dbus_downstream);
+
+	if (!ok) {
+		log_error_id(proxy->name, "unable to create forwarding process");
+		/* mark this proxy as failed */
+	}
+
+	return ok;
 }
 
 /*
@@ -2201,10 +2326,6 @@ dbus_bridge_port_acquire_name(dbus_bridge_port_t *port, const char *name)
 
 	if (!dbus_service_proxy_connect(proxy, port)) {
 		log_error("Unable to establish a %s proxy connection for %s", port->name, proxy->name);
-
-		if (proxy->dbus)
-			dbus_client_disconnect(proxy->dbus);
-
 		return false;
 	}
 
@@ -2218,11 +2339,8 @@ dbus_bridge_port_release_name(dbus_bridge_port_t *port, const char *name)
 
 	for (pos = &port->service_proxies; (proxy = *pos) != NULL; pos = &proxy->next) {
 		if (!strcmp(proxy->name, name)) {
-			log_debug("%s: we have a proxy for %s", port->name, name);
-			if (proxy->dbus) {
-				log_debug("%s: deactivating proxy for %s", port->name, name);
-				proxy->dbus->state = STATE_SHUTTING_DOWN;
-			}
+			log_debug("%s: deactivating proxy for %s", port->name, name);
+			dbus_service_proxy_stop(proxy);
 			break;
 		}
 	}

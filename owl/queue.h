@@ -38,6 +38,8 @@ typedef struct queue {
 	queue_entry_t *		head;
 } queue_t;
 
+extern queue_t *	queue_alloc(void);
+extern void		queue_free(queue_t *);
 extern void		queue_init(queue_t *);
 extern void		queue_destroy(queue_t *);
 extern unsigned long	queue_available(const queue_t *);

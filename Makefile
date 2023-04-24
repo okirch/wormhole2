@@ -24,7 +24,8 @@ IMGDELTA_SRCS	= imgdelta.c
 IMGDELTA_OBJS	= $(IMGDELTA_SRCS:.c=.o)
 
 DBUSRELAY	= dbus-relay
-DBUSRELAY_SRCS	= dbus.c
+DBUSRELAY_SRCS	= dbus.c \
+		  forwarder.c
 DBUSRELAY_OBJS	= $(DBUSRELAY_SRCS:.c=.o)
 
 LIBWORMHOLE	= libwormhole.a
