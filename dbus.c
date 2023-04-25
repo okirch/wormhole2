@@ -99,6 +99,8 @@ struct dbus_service_proxy {
 	char *			bus_address;
 
 	char *			name;
+	char *			log_name;
+
 	pid_t			pid;
 };
 
@@ -579,11 +581,17 @@ static dbus_service_proxy_t *
 dbus_service_proxy_new(const char *name, const char *bus_address)
 {
 	dbus_service_proxy_t *proxy;
+	const char *s;
 
 	proxy = calloc(1, sizeof(*proxy));
 	strutil_set(&proxy->name, name);
 	strutil_set(&proxy->bus_address, bus_address);
 	proxy->pid = -1;
+
+	if ((s = strrchr(name, '.')) != NULL && *(++s) != '\0')
+		strutil_set(&proxy->log_name, s);
+	else
+		strutil_set(&proxy->log_name, name);
 	return proxy;
 }
 
@@ -624,7 +632,7 @@ dbus_service_proxy_start(dbus_service_proxy_t *proxy, dbus_client_t *dbus_upstre
 	}
 
 	/* we're the child process */
-	fwd = dbus_forwarder_new(proxy->name);
+	fwd = dbus_forwarder_new(proxy->log_name);
 
 	dbus_debug(dbus_upstream, "Configuring upstream port");
 	__dbus_service_proxy_configure_port(dbus_forwarder_get_upstream(fwd), dbus_upstream->bus_name, upstream_fd);
@@ -659,7 +667,7 @@ dbus_service_proxy_create_client(dbus_service_proxy_t *proxy, dbus_bridge_port_t
 		return NULL;
 
 	/* Create the dbus client and connect, claiming the name we've been given */
-	snprintf(name, sizeof(name), "%s:%s", port->name, proxy->name);
+	snprintf(name, sizeof(name), "%s:%s", proxy->log_name, port->name);
 	dbus = dbus_client_new(name, &dbus_impl_proxy, port);
 	strutil_set(&dbus->request_name, proxy->name);
 
