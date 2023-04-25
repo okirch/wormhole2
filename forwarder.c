@@ -366,6 +366,9 @@ __dbus_message_patch_begin(const struct buffer_segment *where, buffer_t *bp, buf
 	if (orig->rpos > where->offset)
 		return false;
 
+	if (!buffer_put_padding(bp, 4))
+		return false;
+
 	if (!buffer_copy(orig, where->offset - orig->rpos, bp))
 		return false;
 
@@ -389,7 +392,15 @@ __dbus_message_header_get_string(buffer_t *bp, char field_type, struct dbus_head
 	__dbus_message_segment_begin(&var->where, bp);
 	if (!__dbus_message_get_string(bp, &var->value))
 		return false;
+
+	/* If we're not at the end of the header array, consume any padding between
+	 * this header field and the next. */
+	if (buffer_available(bp) && !buffer_consume_padding(bp, 4))
+		return false;
+
 	__dbus_message_segment_end(&var->where, bp);
+
+	// log_debug("SEGMENT: %u/%u, value=%s", var->where.offset, var->where.len, var->value);
 	return true;
 }
 
@@ -433,6 +444,8 @@ __dbus_message_header_get_uint32(buffer_t *bp, struct dbus_header_uint32 *var)
 	if (!buffer_get(bp, &var->value, 4))
 		return false;
 	__dbus_message_segment_end(&var->where, bp);
+
+	// log_debug("SEGMENT: %u/%u, value=%u", var->where.offset, var->where.len, var->value);
 	return true;
 }
 
@@ -702,8 +715,11 @@ dbus_build_patched_header(dbus_semicooked_message_t *msg)
 	}
 
 	remaining = buffer_available(orig_hdr);
-	if (!buffer_copy(orig_hdr, remaining, hdr))
-		goto failed;
+	if (remaining) {
+		if (!buffer_put_padding(hdr, 4)
+		 || !buffer_copy(orig_hdr, remaining, hdr))
+			goto failed;
+	}
 
 	/* Set the correct length for the header field array, and pad out the header to
 	 * a multiple of 8 */
