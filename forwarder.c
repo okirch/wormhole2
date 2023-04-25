@@ -254,7 +254,7 @@ dbus_semicooked_message_display(const dbus_forwarding_port_t *fwport,  const cha
 		strutil_dynstr_appendf(&ds, "; reply-serial=%u", msg->reply_serial.value);
 
 	log_debug_id(fwport->name,
-			"%s %s; seq %u; flags 0x%x%s", verb, dbus_semicooked_message_type_to_string(msg->msg_type),
+			"%s %s; serial %u; flags 0x%x%s", verb, dbus_semicooked_message_type_to_string(msg->msg_type),
 			msg->msg_seq, msg->msg_flags,
 			strutil_dynstr_value(&ds));
 
@@ -613,11 +613,12 @@ __dbus_get_payload(dbus_semicooked_message_t *msg, queue_t *q)
 static dbus_forwarding_port_t *
 dbus_forwarding_port_new(const char *name)
 {
+	static unsigned int port_id = 1;
 	dbus_forwarding_port_t *fwport;
 
 	fwport = calloc(1, sizeof(*fwport));
 	strutil_set(&fwport->name, name);
-	fwport->seq = 1;
+	fwport->seq = (port_id++) * 1000;
 
 	fwport->sendq = queue_alloc();
 	fwport->recvq = queue_alloc();
@@ -648,8 +649,6 @@ dbus_forwarder_create_call_record(dbus_forwarding_port_t *fwport, dbus_semicooke
 
 	call->next = fwport->calls;
 	fwport->calls = call;
-
-	log_debug_id(fwport->name, "created call record for msg %u", msg->msg_seq);
 
 	return call;
 }
@@ -862,7 +861,7 @@ dbus_forwarder_process_outgoing(dbus_forwarding_port_t *fwport, dbus_semicooked_
 		strutil_set(&call->upstream.sender, msg->sender.value);
 	}
 
-	dbus_semicooked_message_display(fwport, "sending", msg);
+	dbus_semicooked_message_display(fwport, "forwarding", msg);
 	new_hdr = dbus_build_patched_header(msg);
 
 	body = msg->msg_payload;
