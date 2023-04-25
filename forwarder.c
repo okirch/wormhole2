@@ -901,7 +901,7 @@ static bool
 dbus_queue_xmit(queue_t *q, int fd)
 {
 	while (q->head) {
-		buffer_t *bp = &q->head->buf;
+		buffer_t *bp = q->head->buf;
 		int sent, count;
 
 		count = buffer_available(bp);

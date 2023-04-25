@@ -30,7 +30,7 @@
 
 typedef struct queue_entry {
 	struct queue_entry *	next;
-	buffer_t		buf;
+	buffer_t *		buf;
 } queue_entry_t;
 
 typedef struct queue {

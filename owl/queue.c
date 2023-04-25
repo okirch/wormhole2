@@ -28,20 +28,31 @@
 #include <assert.h>
 #include "queue.h"
 
+#define QUEUE_MEM_POISON	1
+
 static inline queue_entry_t *
-queue_entry_new(void)
+queue_entry_new(buffer_t *bp)
 {
 	queue_entry_t *qe;
 
-	qe = calloc(1, sizeof(*qe) + QUEUE_ENTRY_SZ);
-	buffer_init_write(&qe->buf, qe + 1, QUEUE_ENTRY_SZ);
+	qe = calloc(1, sizeof(*qe));
+	if (bp == NULL)
+		bp = buffer_alloc_write(QUEUE_ENTRY_SZ);
+	qe->buf = bp;
 	return qe;
 }
 
 static inline void
 queue_entry_free(queue_entry_t *qe)
 {
-	memset(qe, 0x55, sizeof(*qe) + QUEUE_ENTRY_SZ);
+	if (qe->buf) {
+		buffer_free(qe->buf);
+		qe->buf = NULL;
+	}
+
+#if QUEUE_MEM_POISON
+	memset(qe, 0x55, sizeof(*qe));
+#endif
 	free(qe);
 }
 
@@ -74,7 +85,7 @@ queue_validate(const queue_t *q)
 	unsigned int count = 0;
 
 	for (qe = q->head; qe; qe = qe->next)
-		count += buffer_available(&qe->buf);
+		count += buffer_available(qe->buf);
 	assert(q->size == count);
 	assert(q->size <= QUEUE_SZ);
 }
@@ -86,13 +97,13 @@ queue_destroy(queue_t *q)
 
 	while ((qe = q->head) != NULL) {
 		q->head = qe->next;
-		q->size -= buffer_available(&qe->buf);
+		q->size -= buffer_available(qe->buf);
 		queue_entry_free(qe);
 	}
 }
 
 static queue_entry_t *
-queue_add_entry(queue_t *q)
+queue_add_entry(queue_t *q, buffer_t *bp)
 {
 	queue_entry_t *qe, **pos;
 
@@ -102,7 +113,7 @@ queue_add_entry(queue_t *q)
 	for (pos = &q->head; (qe = *pos) != NULL; pos = &qe->next)
 		;
 
-	qe = queue_entry_new();
+	qe = queue_entry_new(bp);
 	*pos = qe;
 	return qe;
 }
@@ -143,10 +154,10 @@ queue_append(queue_t *q, const void *p, size_t count)
 		unsigned int n;
 		buffer_t *bp;
 
-		if (qe == NULL || buffer_tailroom(&qe->buf) == 0)
-			qe = queue_add_entry(q);
+		if (qe == NULL || buffer_tailroom(qe->buf) == 0)
+			qe = queue_add_entry(q, NULL);
 
-		bp = &qe->buf;
+		bp = qe->buf;
 
 		if ((n = buffer_tailroom(bp)) > count)
 			n = count;
@@ -176,7 +187,7 @@ queue_peek(const queue_t *q, void *p, size_t count)
 		return NULL;
 
 	for (qe = q->head; qe && count; qe = qe->next) {
-		const buffer_t *bp = &qe->buf;
+		const buffer_t *bp = qe->buf;
 		unsigned int n;
 
 		assert(qe);
@@ -228,7 +239,7 @@ queue_get(queue_t *q, void *p, size_t count)
 		return NULL;
 
 	while (count && (qe = q->head) != NULL) {
-		buffer_t *bp = &qe->buf;
+		buffer_t *bp = qe->buf;
 		unsigned int n;
 
 		assert(qe);
@@ -269,7 +280,7 @@ queue_gets(queue_t *q, char *buffer, size_t size)
 
 	pos = 0;
 	while ((qe = q->head) != NULL) {
-		buffer_t *bp = &qe->buf;
+		buffer_t *bp = qe->buf;
 		int cc;
 
 		assert(qe);
@@ -322,7 +333,7 @@ queue_skip(queue_t *q, size_t count)
 		return NULL;
 
 	while ((qe = q->head) != NULL) {
-		buffer_t *bp = &qe->buf;
+		buffer_t *bp = qe->buf;
 		unsigned int n;
 
 		n = buffer_available(bp);
@@ -360,14 +371,23 @@ queue_transfer(queue_t *dstq, queue_t *srcq, size_t count)
 }
 
 bool
-queue_transfer_buffer(queue_t *dstq, buffer_t *bp)
+queue_transfer_buffer(queue_t *q, buffer_t *bp)
 {
-	bool ok;
+	unsigned int count = buffer_available(bp);
 
-	/* FIXME: insert rather than copy */
-	ok = queue_append(dstq, buffer_read_pointer(bp), buffer_available(bp));
-	buffer_free(bp);
-	return ok;
+	queue_validate(q);
+
+	if (count == 0) {
+		buffer_free(bp);
+		return true;
+	}
+
+	if (count > queue_tailroom(q))
+		return false;
+
+	q->size += count;
+	queue_add_entry(q, bp);
+	return true;
 }
 
 bool
@@ -383,16 +403,16 @@ queue_advance_head(queue_t *q, size_t count)
 		if (!(qe = q->head))
 			return false;
 
-		if ((n = buffer_available(&qe->buf)) > count)
+		if ((n = buffer_available(qe->buf)) > count)
 			n = count;
 
-		buffer_skip(&qe->buf, n);
+		buffer_skip(qe->buf, n);
 		count -= n;
 
 		assert(q->size >= n);
 		q->size -= n;
 
-		if (buffer_eof(&qe->buf)) {
+		if (buffer_eof(qe->buf)) {
 			q->head = qe->next;
 			queue_entry_free(qe);
 		}
