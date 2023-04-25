@@ -378,6 +378,19 @@ dbus_client_connect(dbus_client_t *dbus, const char *dbus_path)
 }
 
 /*
+ * Helper functions
+ */
+static void
+dbus_free_string_array(char **array)
+{
+	char **p;
+
+	for (p = array; *p; ++p)
+		free(*p);
+	free(array);
+}
+
+/*
  * Timers
  */
 static int
@@ -841,14 +854,7 @@ dbus_bridge_port_list_names(dbus_bridge_port_t *port)
 
 		dbus_debug(dbus, "Found %u registered names", count);
 		dbus_bridge_process_registered_names(dbus, (const char **) registered, count);
-
-		{
-			char **p;
-
-			for (p = registered; *p; ++p)
-				free(*p);
-			free(registered);
-		}
+		dbus_free_string_array(registered);
 	}
 
 	return true;
