@@ -977,10 +977,10 @@ static bool
 dbus_forwarding_port_doio(dbus_forwarding_port_t *fwport, struct pollfd *p)
 {
 	// log_debug_id(fwport->name, "%s(revents=0x%x)", __func__, p->revents);
-	if ((p->revents & POLLOUT) && !dbus_queue_xmit(fwport->sendq, fwport->fd))
+	if ((p->revents & (POLLIN | POLLHUP | POLLERR)) && !dbus_forwarder_recv(fwport))
 		return false;
 
-	if ((p->revents & (POLLIN | POLLHUP | POLLERR)) && !dbus_forwarder_recv(fwport))
+	if ((p->revents & POLLOUT) && !dbus_queue_xmit(fwport->sendq, fwport->fd))
 		return false;
 
 	return true;
@@ -1023,17 +1023,21 @@ dbus_forwarder_get_downstream(dbus_forwarder_t *fwd)
 	return fwd->downstream;
 }
 
+const char *
+dbus_forwarding_port_get_name(const dbus_forwarding_port_t *fwport)
+{
+	return fwport->name;
+}
+
 void
 dbus_forwarding_port_set_bus_name(dbus_forwarding_port_t *fwport, const char *bus_name)
 {
-	log_debug_id(fwport->name, "bus_name=%s", bus_name);
 	strutil_set(&fwport->bus_name, bus_name);
 }
 
 void
 dbus_forwarding_port_set_socket(dbus_forwarding_port_t *fwport, int fd)
 {
-	log_debug_id(fwport->name, "socket=%d", fd);
 	fwport->fd = fd;
 }
 

@@ -27,6 +27,7 @@ typedef struct dbus_forwarder dbus_forwarder_t;
 extern dbus_forwarder_t *	dbus_forwarder_new(const char *name);
 extern dbus_forwarding_port_t *	dbus_forwarder_get_upstream(dbus_forwarder_t *fwd);
 extern dbus_forwarding_port_t *	dbus_forwarder_get_downstream(dbus_forwarder_t *fwd);
+extern const char *		dbus_forwarding_port_get_name(const dbus_forwarding_port_t *fwport);
 extern void			dbus_forwarding_port_set_bus_name(dbus_forwarding_port_t *fwport, const char *bus_name);
 extern void			dbus_forwarding_port_set_socket(dbus_forwarding_port_t *fwport, int fd);
 extern void			dbus_forwarder_eventloop(dbus_forwarder_t *fwd);

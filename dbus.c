@@ -47,7 +47,7 @@ typedef const struct dbus_client_ops dbus_client_ops_t;
 extern bool			dbus_bridge_port_activate_proxy(dbus_bridge_port_t *port, const char *name);
 extern void			dbus_bridge_port_event_name_lost(dbus_bridge_port_t *port, const char *name);
 extern void			dbus_bridge_port_event_name_acquired(dbus_bridge_port_t *port, const char *name);
-static bool			dbus_service_proxy_connect(dbus_service_proxy_t *proxy, dbus_bridge_port_t *port);
+static bool			dbus_service_proxy_connect(dbus_service_proxy_t *proxy);
 
 static void			dbus_service_proxy_stop(dbus_service_proxy_t *proxy);
 
@@ -100,6 +100,9 @@ struct dbus_service_proxy {
 
 	char *			name;
 	char *			log_name;
+
+	dbus_timer_t *		restart_timer;
+	dbus_bridge_port_t *	port;
 
 	bool			enabled;
 	pid_t			pid;
@@ -168,6 +171,12 @@ dbus_client_free(dbus_client_t *dbus)
 		dbus->signal_handlers = rec->next;
 		dbus_sigrec_free(rec);
 	}
+
+	strutil_drop(&dbus->debug_name);
+	strutil_drop(&dbus->bus_name);
+	strutil_drop(&dbus->request_name);
+
+	free(dbus);
 }
 
 static dbus_sigrec_t *
@@ -516,8 +525,9 @@ __dbus_monitor_reconnect(dbus_bridge_port_t *port)
 
 	/* Loop over all proxies and reconnect those as well. */
 	for (proxy = port->service_proxies; proxy; proxy = proxy->next) {
+		assert(proxy->port == port);
 		if (proxy->enabled && proxy->pid < 0)
-			dbus_service_proxy_connect(proxy, port);
+			dbus_service_proxy_connect(proxy);
 	}
 
 	return 0;
@@ -588,14 +598,15 @@ static dbus_client_ops_t	dbus_impl_proxy = {
  * Service proxy
  */
 static dbus_service_proxy_t *
-dbus_service_proxy_new(const char *name, const char *bus_address)
+dbus_service_proxy_new(dbus_bridge_port_t *port, const char *name)
 {
 	dbus_service_proxy_t *proxy;
 	const char *s;
 
 	proxy = calloc(1, sizeof(*proxy));
+	proxy->port = port;
 	strutil_set(&proxy->name, name);
-	strutil_set(&proxy->bus_address, bus_address);
+	strutil_set(&proxy->bus_address, port->bus_address);
 	proxy->pid = -1;
 
 	if ((s = strrchr(name, '.')) != NULL && *(++s) != '\0')
@@ -606,52 +617,16 @@ dbus_service_proxy_new(const char *name, const char *bus_address)
 }
 
 static void
-__dbus_service_proxy_configure_port(dbus_forwarding_port_t *port, const char *bus_name, int fd)
+__dbus_service_proxy_configure_port(dbus_service_proxy_t *proxy, dbus_forwarding_port_t *port, dbus_client_t *dbus)
 {
-	dbus_forwarding_port_set_bus_name(port, bus_name);
-	dbus_forwarding_port_set_socket(port, fd);
-}
-
-static bool
-dbus_service_proxy_start(dbus_service_proxy_t *proxy, dbus_client_t *dbus_upstream, dbus_client_t *dbus_downstream)
-{
-	dbus_forwarder_t *fwd;
-	int upstream_fd, downstream_fd;
-	pid_t pid;
-
-	if (proxy->pid > 0) {
-		log_error_id(proxy->name, "we already have an active proxy process");
-		return false;
+	if (dbus == NULL) {
+		log_error_id(proxy->log_name, "unable to connect %s", dbus_forwarding_port_get_name(port));
+		exit(1);
 	}
 
-	/* libsystemd is a bit overly restrictive here. Calling sd_bus_get_fd() after fork
-	 * will return -ECHILD :-/
-	 */
-	upstream_fd = dup(sd_bus_get_fd(dbus_upstream->h));
-	downstream_fd = dup(sd_bus_get_fd(dbus_downstream->h));
-
-	pid = fork();
-	if (pid < 0) {
-		log_error_id(proxy->name, "unable to fork proxy process: %m");
-		return false;
-	}
-
-	if (pid > 0) {
-		proxy->pid = pid;
-		return true;
-	}
-
-	/* we're the child process */
-	fwd = dbus_forwarder_new(proxy->log_name);
-
-	dbus_debug(dbus_upstream, "Configuring upstream port");
-	__dbus_service_proxy_configure_port(dbus_forwarder_get_upstream(fwd), dbus_upstream->bus_name, upstream_fd);
-	dbus_debug(dbus_downstream, "Configuring downstream port");
-	__dbus_service_proxy_configure_port(dbus_forwarder_get_downstream(fwd), dbus_downstream->bus_name, downstream_fd);
-
-	dbus_forwarder_eventloop(fwd);
-
-	exit(0);
+	// log_debug_id(proxy->log_name, "Configuring port %s", dbus_forwarding_port_get_name(port));
+	dbus_forwarding_port_set_bus_name(port, dbus->bus_name);
+	dbus_forwarding_port_set_socket(port, sd_bus_get_fd(dbus->h));
 }
 
 static void
@@ -734,9 +709,46 @@ failed:
 }
 
 static bool
-dbus_service_proxy_connect(dbus_service_proxy_t *proxy, dbus_bridge_port_t *port)
+dbus_service_proxy_start(dbus_service_proxy_t *proxy)
 {
-	dbus_client_t *dbus_upstream, *dbus_downstream;
+	dbus_bridge_port_t *port = proxy->port;
+	dbus_forwarder_t *fwd;
+	pid_t pid;
+
+	if (proxy->pid > 0) {
+		log_error_id(proxy->name, "we already have an active proxy process");
+		return false;
+	}
+
+	pid = fork();
+	if (pid < 0) {
+		log_error_id(proxy->name, "unable to fork proxy process: %m");
+		return false;
+	}
+
+	if (pid > 0) {
+		proxy->pid = pid;
+		return true;
+	}
+
+	/* we're the child process */
+	fwd = dbus_forwarder_new(proxy->log_name);
+
+	__dbus_service_proxy_configure_port(proxy, dbus_forwarder_get_upstream(fwd),
+			dbus_service_proxy_connect_upstream(proxy, port->other));
+
+	__dbus_service_proxy_configure_port(proxy, dbus_forwarder_get_downstream(fwd),
+			dbus_service_proxy_connect_downstream(proxy, port));
+
+	dbus_forwarder_eventloop(fwd);
+
+	exit(0);
+}
+
+static bool
+dbus_service_proxy_connect(dbus_service_proxy_t *proxy)
+{
+	dbus_bridge_port_t *port = proxy->port;
 	bool ok = false;
 
 	if (port->bus_address == NULL) {
@@ -753,15 +765,8 @@ dbus_service_proxy_connect(dbus_service_proxy_t *proxy, dbus_bridge_port_t *port
 	(void) dbus_service_proxy_stop(proxy);
 
 	log_debug("Trying to create a proxy for %s on port %s", proxy->name, port->name);
-	dbus_upstream = dbus_service_proxy_connect_upstream(proxy, port->other);
-	dbus_downstream = dbus_service_proxy_connect_downstream(proxy, port);
-	if (dbus_upstream && dbus_downstream)
-		ok = dbus_service_proxy_start(proxy, dbus_upstream, dbus_downstream);
+	ok = dbus_service_proxy_start(proxy);
 
-	if (dbus_upstream)
-		dbus_client_free(dbus_upstream);
-	if (dbus_downstream)
-		dbus_client_free(dbus_downstream);
 
 	if (!ok) {
 		log_error_id(proxy->name, "unable to create forwarding process");
@@ -769,6 +774,33 @@ dbus_service_proxy_connect(dbus_service_proxy_t *proxy, dbus_bridge_port_t *port
 	}
 
 	return ok;
+}
+
+static void
+dbus_service_proxy_add_timer(dbus_service_proxy_t *proxy, unsigned long timeout_ms, int (*callback)(dbus_service_proxy_t *))
+{
+	if (proxy->restart_timer == NULL)
+		proxy->restart_timer = dbus_timer_new(timeout_ms, (dbus_timer_callback_fn_t *) callback, proxy);
+	else
+		dbus_timer_restart(proxy->restart_timer);
+}
+
+static int
+__dbus_service_proxy_restart(dbus_service_proxy_t *proxy)
+{
+	if (!dbus_service_proxy_connect(proxy))
+		return 1; /* returning non-zero means keep trying */
+
+	return 0;
+}
+
+static void
+dbus_service_proxy_attempt_restart(dbus_service_proxy_t *proxy)
+{
+	/* FIXME: we should not reset the timer when it's running.
+	 * Otherwise, a segfault/bug in the forwarder startup code will result
+	 * in us respawning the forwarder in a tight loop. */
+	dbus_service_proxy_add_timer(proxy, 1000000, __dbus_service_proxy_restart);
 }
 
 /*
@@ -862,7 +894,7 @@ __dbus_bridge_port_get_proxy(dbus_bridge_port_t *port, const char *name, bool cr
 	}
 
 	if (proxy == NULL && create)
-		*pos = proxy = dbus_service_proxy_new(name, port->bus_address);
+		*pos = proxy = dbus_service_proxy_new(port, name);
 
 	return proxy;
 }
@@ -879,6 +911,19 @@ dbus_bridge_port_find_proxy(dbus_bridge_port_t *port, const char *name)
 	return __dbus_bridge_port_get_proxy(port, name, false);
 }
 
+static dbus_service_proxy_t *
+dbus_bridge_port_find_proxy_by_pid(dbus_bridge_port_t *port, pid_t pid)
+{
+	dbus_service_proxy_t *proxy;
+
+	for (proxy = port->service_proxies; proxy != NULL; proxy = proxy->next) {
+		if (proxy->pid == pid)
+			return proxy;
+	}
+
+	return NULL;
+}
+
 bool
 dbus_bridge_port_activate_proxy(dbus_bridge_port_t *port, const char *name)
 {
@@ -888,7 +933,7 @@ dbus_bridge_port_activate_proxy(dbus_bridge_port_t *port, const char *name)
 		return false;
 
 	proxy->enabled = true;
-	if (!dbus_service_proxy_connect(proxy, port)) {
+	if (!dbus_service_proxy_connect(proxy)) {
 		log_error("Unable to establish a %s proxy connection for %s", port->name, proxy->name);
 		return false;
 	}
@@ -904,8 +949,8 @@ dbus_bridge_port_release_name(dbus_bridge_port_t *port, const char *name)
 	for (pos = &port->service_proxies; (proxy = *pos) != NULL; pos = &proxy->next) {
 		if (!strcmp(proxy->name, name)) {
 			log_debug("%s: disabling proxy for %s", port->name, name);
-			dbus_service_proxy_stop(proxy);
 			proxy->enabled = false;
+			dbus_service_proxy_stop(proxy);
 			break;
 		}
 	}
@@ -931,6 +976,55 @@ dbus_bridge_port_event_name_acquired(dbus_bridge_port_t *port, const char *name)
 	dbus_bridge_port_activate_proxy(downstream, name);
 }
 
+/*
+ * Handle child processes that exit
+ */
+static int
+handle_sigchld(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata)
+{
+	dbus_bridge_port_t *port = userdata;
+	dbus_service_proxy_t *proxy;
+	const char *desc = "terminated";
+	int status;
+
+	log_debug("received signal %d from pid %d", si->ssi_signo, si->ssi_pid);
+	if (waitpid(si->ssi_pid, &status, 0) >= 0)
+		desc = procutil_child_status_describe(status);
+
+	if ((proxy = dbus_bridge_port_find_proxy_by_pid(port, si->ssi_pid)) != NULL) {
+		log_debug_id(proxy->log_name, "relay process %s", desc);
+		proxy->pid = -1;
+
+		if (proxy->enabled)
+			dbus_service_proxy_attempt_restart(proxy);
+	}
+
+	return 0;
+}
+
+static bool
+install_sigchld_handler(dbus_bridge_port_t *port)
+{
+	sd_event *event = NULL;
+	sigset_t set;
+	int r;
+
+	sigemptyset(&set);
+	sigaddset(&set, SIGCHLD);
+	sigprocmask(SIG_BLOCK, &set, NULL);
+
+	if (sd_event_default(&event) < 0)
+		log_fatal("Unable to create sd-event loop");
+
+	r = sd_event_add_signal(event, NULL, SIGCHLD, handle_sigchld, port);
+	if (r < 0) {
+		log_debug("sd_event_add_signal() = %s", strerror(-r));
+		return false;
+	}
+
+	return true;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -953,6 +1047,9 @@ main(int argc, char **argv)
 	dbus_bridge_port_create_proxy(port_downstream, "net.hadess.PowerProfiles");
 #endif
 	dbus_bridge_port_create_proxy(port_downstream, "com.intel.tss2.Tabrmd");
+
+	if (!install_sigchld_handler(port_downstream))
+		return 1;
 
 	if (1) {
 		if (!dbus_bridge_port_monitor(port_downstream, true))
