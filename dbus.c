@@ -305,7 +305,7 @@ dbus_client_hangup_callback(sd_event_source *s, int fd, uint32_t revents, void *
 	return 0;
 }
 
-bool
+static bool
 dbus_client_connect(dbus_client_t *dbus, const char *dbus_path)
 {
 	sd_event *event;
@@ -334,7 +334,7 @@ dbus_client_connect(dbus_client_t *dbus, const char *dbus_path)
 		log_fatal("Unable to create sd-event loop");
 	sd_bus_attach_event(dbus->h, event, SD_EVENT_PRIORITY_NORMAL);
 
-	{
+	if (dbus->impl.ops->connection_lost) {
 		int fd;
 
 		if ((fd = sd_bus_get_fd(dbus->h)) < 0)
