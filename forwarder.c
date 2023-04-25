@@ -23,8 +23,9 @@
  * to change some header fields, like serial, sender and destination
  */
 
-#include <stdint.h>
 #include <sys/socket.h>
+#include <sys/poll.h>
+#include <stdint.h>
 #include <stdbool.h>
 #include <assert.h>
 #include <stdarg.h>
@@ -33,20 +34,9 @@
 #include <systemd/sd-event.h>
 #include <systemd/sd-bus-protocol.h>
 
-#include "owl/endpoint.h"
-#include "owl/timers.h"
+#include "owl/bufparser.h"
+#include "owl/queue.h"
 #include "dbus-relay.h"
-
-#define DBUS_SYSTEM_BUS_SOCKET	"/run/dbus/system_bus_socket"
-
-struct dbus_header {
-	unsigned char		endian;
-	unsigned char		msg_type;
-	unsigned char		msg_flags;
-	unsigned char		prot_major;
-	uint32_t		payload_len;
-	uint32_t		msg_serial;
-};
 
 enum {
 	DBUS_HDR_FIELD_PATH = 1,
@@ -59,24 +49,7 @@ enum {
 	DBUS_HDR_FIELD_SIGNATURE,
 };
 
-enum {
-	STATE_SEND_AUTH,
-	STATE_AWAIT_AUTH_RESPONSE,
-	STATE_SEND_BEGIN,
-	STATE_STARTUP_SENDING,
-	STATE_STARTUP_AWAIT_RESPONSE,
-	STATE_RELAYING,
-	STATE_SHUTTING_DOWN
-};
-
-typedef struct dbus_message	dbus_message_t;
-typedef struct dbus_client	dbus_client_t;
 typedef struct dbus_pending_call dbus_pending_call_t;
-typedef struct dbus_sigrec	dbus_sigrec_t;
-typedef struct dbus_call	dbus_call_t;
-
-typedef const struct dbus_client_ops dbus_client_ops_t;
-
 typedef struct dbus_semicooked_message dbus_semicooked_message_t;
 
 static uint8_t			dbus_host_endianness = 'l';
@@ -135,178 +108,29 @@ struct dbus_semicooked_message {
 	struct dbus_header_string destination;
 };
 
-
-struct dbus_client {
-	char *			debug_name;
-
-	sd_bus *		h;
-
-	uint8_t			endianness;
-	int			state;
-	unsigned int		startup_step;
-	uint32_t		seq;
-
-	struct {
-		dbus_client_ops_t *ops;
-		void *		data;
-	} impl;
-
-	char *			bus_name;
-	char *			request_name;
-
-	endpoint_t *		ep;
-	dbus_pending_call_t *	pending;
-	dbus_sigrec_t *		signal_handlers;
-};
-
-struct dbus_client_ops {
-	struct dbus_startup_call *startup_sequence;
-
-	void			(*connection_lost)(dbus_client_t *);
-	void			(*process_registered_names)(dbus_client_t *, const char **names, unsigned int count);
-	void			(*name_acquired)(dbus_client_t *, const char *);
-	void			(*name_lost)(dbus_client_t *, const char *);
-	void			(*name_owner_changed)(dbus_client_t *, const char *, const char *, const char *);
-};
-
-typedef int			dbus_timer_callback_fn_t(void *);
-struct dbus_timer {
-	unsigned long		initial_timeout_ms;
-	unsigned long		current_timeout_ms;
-	sd_event_source *	event_source;
-	dbus_timer_callback_fn_t *callback;
-	void *			userdata;
-};
-
-
-struct dbus_call {
-	sd_bus_message *	(*build_call)(dbus_client_t *);
-	bool			(*response)(dbus_client_t *, sd_bus_message *);
-	bool			(*error)(dbus_client_t *, const sd_bus_error *);
-};
-
-typedef void (*dbus_response_handler_t)(dbus_client_t *dbus, dbus_pending_call_t *call, const dbus_message_t *msg);
-typedef void (*dbus_signal_handler_t)(dbus_client_t *dbus, sd_bus_message *msg);
-
 struct dbus_pending_call {
 	dbus_pending_call_t *	next;
+	bool			timed_out;
 
 	struct {
 		uint32_t	seq;
 		char *		sender;
 		char *		destination;
 	} downstream, upstream;
-
-	bool			timed_out;
-
-	dbus_message_t *	msg;
-	owl_timer_t *		timer;
-
-	dbus_response_handler_t handler;
 };
 
-struct dbus_sigrec {
-	dbus_sigrec_t *		next;
-	char *			interface;
-	char *			member;
-
-	dbus_signal_handler_t	handler;
-};
 
 #ifdef ENABLE_MESSAGE_TRACING
 # define trace_message		log_debug
-# define trace_message_ep	endpoint_debug
 #else
 # define trace_message(fmt ...) do { } while (0)
-# define trace_message_ep(ep, fmt...) do { } while (0)
 #endif
 
-static inline unsigned int
-align_size_to(unsigned int size, unsigned int multiple)
-{
-	unsigned int over;
-
-	over = size % multiple;
-	if (over != 0)
-		size += multiple - over;
-	return size;
-}
-
-static inline unsigned int
+static unsigned int
 align8(unsigned int size)
 {
 	return (size + 7) & ~7U;
 }
-
-static inline void
-dbus_debug(dbus_client_t *dbus, const char *fmt, ...)
-{
-	char msgbuf[512];
-	va_list ap;
-
-	if (tracing_level == 0)
-		return;
-
-	va_start(ap, fmt);
-	vsnprintf(msgbuf, sizeof(msgbuf), fmt, ap);
-	va_end(ap);
-
-	log_debug("%s: %s", dbus->debug_name, msgbuf);
-}
-
-#if 0
-dbus_client_t *
-dbus_client_new(const char *name, dbus_client_ops_t *ops, void *impl_data)
-{
-	dbus_client_t *dbus;
-
-	dbus = calloc(1, sizeof(*dbus));
-	strutil_set(&dbus->debug_name, name);
-	dbus->impl.ops = ops;
-	dbus->impl.data = impl_data;
-	dbus->endianness = 'l';
-	dbus->state = STATE_SEND_AUTH;
-	dbus->seq = 1;
-
-	return dbus;
-}
-
-void
-dbus_client_free(dbus_client_t *dbus)
-{
-	dbus_sigrec_t *rec;
-
-	if (dbus->h) {
-		sd_bus_unref(dbus->h);
-		dbus->h = NULL;
-	}
-
-	while ((rec = dbus->signal_handlers) != NULL) {
-		dbus->signal_handlers = rec->next;
-		dbus_sigrec_free(rec);
-	}
-}
-
-static dbus_sigrec_t *
-dbus_sigrec_new(const char *interface_name, const char *member_name, dbus_signal_handler_t handler)
-{
-	dbus_sigrec_t *sig;
-
-	sig = calloc(1, sizeof(*sig));
-	strutil_set(&sig->interface, interface_name);
-	strutil_set(&sig->member, member_name);
-	sig->handler = handler;
-	return sig;
-}
-
-static void
-dbus_sigrec_free(dbus_sigrec_t *sig)
-{
-	strutil_drop(&sig->interface);
-	strutil_drop(&sig->member);
-	free(sig);
-}
-#endif
 
 static dbus_pending_call_t *
 dbus_pending_call_new(uint32_t seq, const char *sender, const char *destination)
@@ -328,122 +152,7 @@ dbus_pending_call_free(dbus_pending_call_t *call)
 	free(call);
 }
 
-#if 0
-static void
-dbus_client_insert_call(dbus_client_t *dbus, dbus_pending_call_t *call)
-{
-	/* simple for now */
-	call->next = dbus->pending;
-	dbus->pending = call;
-}
-
-static dbus_pending_call_t *
-dbus_client_find_unlink_call(dbus_client_t *dbus, uint32_t seq)
-{
-	dbus_pending_call_t **pos, *call;
-
-	for (pos = &dbus->pending; (call = *pos) != NULL; pos = &call->next) {
-		if (call->upstream.seq == seq) {
-			*pos = call->next;
-			call->next = NULL;
-			break;
-		}
-	}
-
-	return call;
-}
-
-static void
-dbus_pending_call_timeout(owl_timer_t *timer, void *user_data)
-{
-	dbus_pending_call_t *call = user_data;
-
-	log_debug("%s(%u)", __func__, call->upstream.seq);
-	call->timed_out = true;
-}
-
-static inline void
-dbus_client_expect_response(dbus_client_t *dbus, dbus_message_t *msg, dbus_response_handler_t handler)
-{
-	dbus_pending_call_t *call;
-
-	if ((call = dbus_client_find_unlink_call(dbus, msg->msg_seq)) != NULL) {
-		log_error("%s: duplicate message seq", __func__);
-		dbus_pending_call_free(call);
-	}
-
-	call = dbus_pending_call_new(msg->msg_seq, handler);
-
-	call->timer = owl_timer_create(3000);
-	owl_timer_set_callback(call->timer, dbus_pending_call_timeout, call);
-	owl_timer_hold(call->timer);
-
-	log_debug("inserting call %u", call->seq);
-	dbus_client_insert_call(dbus, call);
-}
-
-static void
-dbus_process_message(dbus_client_t *dbus, const dbus_message_t *msg)
-{
-	dbus_pending_call_t *call;
-
-	if (msg->msg_type == SD_BUS_MESSAGE_METHOD_RETURN) {
-		if ((call = dbus_client_find_unlink_call(dbus, msg->reply_serial)) == NULL) {
-			log_debug("cannot find pending call for seq %u", msg->reply_serial);
-			return;
-		}
-
-		log_debug("Response for call %u", msg->reply_serial);
-		call->handler(dbus, call, msg);
-		dbus_pending_call_free(call);
-
-		/* If we're in startup and there are no more pending calls,
-		 * switch back to sending mode to execute the next step. */
-		if (dbus->state == STATE_STARTUP_AWAIT_RESPONSE
-		 && dbus->pending == NULL)
-			dbus->state = STATE_STARTUP_SENDING;
-	} else
-	if (msg->msg_type == SD_BUS_MESSAGE_SIGNAL) {
-#if 0
-		dbus_sigrec_t *sig;
-
-		dbus_debug(dbus, "received signal %s.%s()", msg->interface_name, msg->member_name);
-		for (sig = dbus->signal_handlers; sig; sig = sig->next) {
-			if (dbus_signal_handler_match(sig, msg)) {
-				dbus_debug(dbus, "Processing %s signal", msg->member_name);
-				sig->handler(dbus, NULL, msg);
-			}
-		}
-#endif
-	}
-}
-#endif
-
-static inline void
-__dbus_make_header(uint8_t *header, uint8_t msg_type, uint8_t msg_flags, uint32_t msg_seq)
-{
-	uint32_t *words;
-
-	header[0] = dbus_host_endianness;
-	header[1] = msg_type;
-	header[2] = msg_flags;
-	header[3] = 1;
-
-	words = (uint32_t *) (header + 4);
-	words[0] = 0;		/* body length */
-	words[1] = msg_seq;
-}
-
-static inline bool
-__dbus_begin_header(buffer_t *hdr, uint8_t msg_type, uint8_t msg_flags, uint32_t msg_seq)
-{
-	uint8_t fixed_header[12];
-
-	__dbus_make_header(fixed_header, msg_type, msg_flags, msg_seq);
-	return buffer_put(hdr, fixed_header, sizeof(fixed_header));
-}
-
-static inline bool
+static bool
 __dbus_patch_header(buffer_t *hdr, buffer_t *orig_hdr, uint32_t msg_seq)
 {
 	uint8_t fixed_header[12];
@@ -459,7 +168,7 @@ __dbus_patch_header(buffer_t *hdr, buffer_t *orig_hdr, uint32_t msg_seq)
 	return buffer_put(hdr, fixed_header, sizeof(fixed_header));
 }
 
-static inline bool
+static bool
 __dbus_finalize_header(buffer_t *hdr)
 {
 	uint32_t *hfa_len_pointer;
@@ -478,34 +187,6 @@ dbus_semicooked_message_new(void)
 
 	msg = calloc(1, sizeof(*msg));
 	return msg;
-}
-
-#if 0
-static dbus_semicooked_message_t *
-dbus_semicooked_message_builder_new(dbus_client_t *dbus, uint8_t msg_type, unsigned int msg_flags)
-{
-	dbus_semicooked_message_t *msg;
-	uint8_t fixed_header[12];
-
-	msg = calloc(1, sizeof(*msg));
-	msg->buffer = buffer_alloc_write(8192);
-	msg->msg_seq = dbus->seq++;
-	msg->msg_type = msg_type;
-
-	/* Construct the fixed size header */
-	__dbus_make_header(fixed_header, msg_type, msg_flags, msg->msg_seq);
-	buffer_put(msg->buffer, fixed_header, sizeof(fixed_header));
-
-	return msg;
-}
-#endif
-
-static inline buffer_t *
-dbus_semicooked_message_build_payload(dbus_semicooked_message_t *msg, size_t size_hint)
-{
-	if (msg->msg_payload == NULL)
-		msg->msg_payload = buffer_alloc_write(size_hint? : 1024);
-	return msg->msg_payload;
 }
 
 static void
@@ -550,7 +231,7 @@ dbus_semicooked_message_type_to_string(unsigned int type)
 	return name;
 }
 
-static inline void
+static void
 dbus_semicooked_message_display(const dbus_forwarding_port_t *fwport,  const char *verb, const dbus_semicooked_message_t *msg)
 {
 	struct strutil_dynstr ds = STRUTIL_DYNSTR_INIT;
@@ -580,35 +261,6 @@ dbus_semicooked_message_display(const dbus_forwarding_port_t *fwport,  const cha
 	strutil_dynstr_destroy(&ds);
 }
 
-static inline unsigned int
-__dbus_get_type_alignment(unsigned char type)
-{
-	static unsigned char alignment_table[256] = {
-	['y'] = 1,	/* byte */
-	['n'] = 2,	/* int16 */
-	['q'] = 2,	/* uint16 */
-	['i'] = 4,	/* int32 */
-	['u'] = 4,	/* uint32 */
-	['x'] = 8,	/* int64 */
-	['t'] = 8,	/* uint64 */
-	['d'] = 8,	/* double */
-	['s'] = 4,	/* string */
-	['o'] = 4,	/* objct path */
-	['g'] = 1,	/* signature */
-	['a'] = 4,	/* array */
-	['r'] = 8,	/* struct */
-	['('] = 8,	/* struct */
-	[')'] = 8,	/* struct */
-	['v'] = 1,	/* variant */
-	['e'] = 8,	/* dict */
-	['{'] = 8,	/* dict */
-	['}'] = 8,	/* dict */
-	['h'] = 4,	/* unix_fd */
-	};
-
-	return alignment_table[type];
-}
-
 static bool
 __dbus_message_put_u32(buffer_t *bp, uint32_t word)
 {
@@ -629,62 +281,6 @@ __dbus_message_put_string(buffer_t *bp, const char *value)
 	    && buffer_put(bp, value, len + 1)
 	    // && buffer_put_padding(bp, 4)
 	;
-}
-
-#if 0
-static bool
-__dbus_message_put_signature(buffer_t *bp, const char *sig)
-{
-	unsigned int sig_len;
-
-	if (sig == NULL)
-		sig = "";
-
-	sig_len = strlen(sig);
-	if (sig_len > 255)
-		return false;
-
-	return __dbus_message_put_byte(bp, sig_len)
-	 && buffer_put(bp, sig, sig_len + 1);
-}
-#endif
-
-static inline bool
-__dbus_message_put_string_array(buffer_t *bp, const char **values)
-{
-	uint32_t *len_ptr, bytes = 0;
-	unsigned int values_wpos;
-	const char *string;
-
-	if (!buffer_put_padding(bp, 4))
-		return false;
-
-	len_ptr = (uint32_t *) buffer_write_pointer(bp);
-	if (!buffer_put(bp, &bytes, 4))
-		return false;
-
-	values_wpos = bp->wpos;
-	while ((string = *values++) != NULL) {
-		if (!__dbus_message_put_string(bp, string))
-			return false;
-	}
-
-	bytes = bp->wpos - values_wpos;
-	*len_ptr = bytes;
-	return true;
-}
-
-static inline void
-__dbus_message_display_next(buffer_t *bp)
-{
-	const unsigned char *next = buffer_read_pointer(bp);
-
-	log_debug("  %4u: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
-			  bp->rpos,
-			  next[0], next[1], next[2], next[3],
-			  next[4], next[5], next[6], next[7],
-			  next[8], next[9], next[10], next[11],
-			  next[12], next[13], next[14], next[15]);
 }
 
 static const char *
@@ -717,23 +313,6 @@ __dbus_message_check_signature(buffer_t *bp, const char *expect)
 
 	return true;
 }
-
-#if 0
-static bool
-__dbus_message_get_signature(buffer_t *bp, char **var)
-{
-	const char *sig;
-
-	if (!__dbus_message_check_signature(bp, "g"))
-		return false;
-
-	if (!(sig = __dbus_message_get_signature_work(bp)))
-		return false;
-
-	strutil_set(var, sig);
-	return true;
-}
-#endif
 
 static bool
 __dbus_message_skip_signature(buffer_t *bp)
@@ -769,46 +348,19 @@ __dbus_message_get_string(buffer_t *bp, char **var)
 	return true;
 }
 
-static inline bool
-__dbus_message_get_string_array(buffer_t *bp, struct strutil_array *result)
-{
-	uint32_t bytes, end;
-	char *str = NULL;
-
-	if (!buffer_consume_padding(bp, 4))
-		return false;
-
-	if (!buffer_get(bp, &bytes, 4))
-		return false;
-
-	end = bp->rpos + bytes;
-	while (bp->rpos < end) {
-		if (!__dbus_message_get_string(bp, &str))
-			return false;
-
-		if (bp->rpos > end)
-			return false;
-
-		strutil_array_append(result, str);
-	}
-
-	strutil_drop(&str);
-	return true;
-}
-
-static inline void
+static void
 __dbus_message_segment_begin(struct buffer_segment *where, buffer_t *bp)
 {
 	where->offset = bp->rpos;
 }
 
-static inline void
+static void
 __dbus_message_segment_end(struct buffer_segment *where, buffer_t *bp)
 {
 	where->len = bp->rpos - where->offset;
 }
 
-static inline bool
+static bool
 __dbus_message_patch_begin(const struct buffer_segment *where, buffer_t *bp, buffer_t *orig)
 {
 	if (orig->rpos > where->offset)
@@ -820,7 +372,7 @@ __dbus_message_patch_begin(const struct buffer_segment *where, buffer_t *bp, buf
 	return buffer_skip(orig, where->len);
 }
 
-static inline bool
+static bool
 __dbus_message_patch_end(const struct buffer_segment *where, buffer_t *bp, buffer_t *orig)
 {
 	return true;
@@ -894,118 +446,6 @@ __dbus_header_field_patch_uint32(buffer_t *hdr, buffer_t *orig_hdr, const struct
 		return false;
 
 	return __dbus_message_patch_end(&var->where, hdr, orig_hdr);
-}
-
-#if 0
-static bool
-__dbus_message_begin_header_field(buffer_t *bp, uint8_t field_type, const char *field_sig)
-{
-	if (!buffer_put_padding(bp, 4))
-		return false;
-
-	return __dbus_message_put_byte(bp, field_type)
-	    && __dbus_message_put_signature(bp, field_sig);
-}
-
-static bool
-__dbus_message_header_put_object_path(buffer_t *bp,  uint8_t field_type, const char *value)
-{
-	if (value == NULL)
-		return true;
-
-	if (!__dbus_message_begin_header_field(bp, field_type, "o"))
-		return false;
-
-	return __dbus_message_put_string(bp, value);
-}
-
-static bool
-__dbus_message_header_put_string(buffer_t *bp,  uint8_t field_type, const char *value)
-{
-	if (value == NULL)
-		return true;
-
-	if (!__dbus_message_begin_header_field(bp, field_type, "s"))
-		return false;
-
-	return __dbus_message_put_string(bp, value);
-}
-
-static bool
-__dbus_message_header_put_signature(buffer_t *bp,  uint8_t field_type, const char *value)
-{
-	if (value == NULL)
-		return true;
-
-	if (!__dbus_message_begin_header_field(bp, field_type, "g"))
-		return false;
-
-	return __dbus_message_put_signature(bp, value);
-}
-#endif
-
-bool
-dbus_semicooked_message_method_build_header(dbus_semicooked_message_t *msg)
-{
-	buffer_t *bp = msg->buffer;
-	uint32_t *hfa_pointer, *hl_pointer;
-	size_t hfa_offset;
-
-	trace_message("%s(hdrlen=%u, payloadlen=%u)", __func__, buffer_available(bp), 
-			msg->msg_payload? buffer_available(msg->msg_payload) : 0);
-
-	/* header field array offset */
-	hfa_offset = bp->wpos;
-	hfa_pointer = buffer_write_pointer(bp);
-	__buffer_advance_tail(bp, 4);
-
-	/*
-	if (!__dbus_message_header_put_object_path(bp, DBUS_HDR_FIELD_PATH, msg->object_path)
-	 || !__dbus_message_header_put_string(bp, DBUS_HDR_FIELD_DESTINATION, msg->destination)
-	 || !__dbus_message_header_put_string(bp, DBUS_HDR_FIELD_INTERFACE, msg->interface_name)
-	 || !__dbus_message_header_put_string(bp, DBUS_HDR_FIELD_MEMBER, msg->member_name)
-	 || !__dbus_message_header_put_signature(bp, DBUS_HDR_FIELD_SIGNATURE, msg->signature)
-	 )
-		return false;
-		*/
-
-	*hfa_pointer = bp->wpos - hfa_offset - 4;
-
-	/* stick the message body length into the fixed header */
-	hl_pointer = (uint32_t *) (bp->data + bp->rpos + 4);
-	if (msg->msg_payload != NULL) {
-		*hl_pointer = buffer_available(msg->msg_payload);
-	} else {
-		*hl_pointer = 0;
-	}
-
-	/* pad out the header to an 8 byte boundary */
-	if (!buffer_put_padding(bp, 8))
-		return false;
-
-	return true;
-}
-
-static inline bool
-dbus_semicooked_message_transmit(endpoint_t *ep, queue_t *q, dbus_semicooked_message_t *msg)
-{
-	buffer_t *bp;
-
-	if (!dbus_semicooked_message_method_build_header(msg))
-		return false;
-
-#ifdef notyet
-	if (msg->buffer) {
-		queue_transfer_buffer(q, msg->buffer);
-		msg->buffer = NULL;
-	}
-#else
-	if ((bp = msg->buffer) != NULL)
-		queue_append(q, buffer_read_pointer(bp), buffer_available(bp));
-	if ((bp = msg->msg_payload) != NULL)
-		queue_append(q, buffer_read_pointer(bp), buffer_available(bp));
-#endif
-	return true;
 }
 
 /*
@@ -1156,166 +596,6 @@ __dbus_get_payload(dbus_semicooked_message_t *msg, queue_t *q)
 
 	return true;
 }
-
-#if 0
-static dbus_semicooked_message_t *
-dbus_handle_incoming(dbus_forwarding_port_t *fwport, queue_t *q)
-{
-	unsigned char fixed_header[12 + 4];	/* fixed header + header field array length */
-	uint32_t msg_seq, payload_len, header_len, payload_alignment, total_msg_size, total_header_size;
-	dbus_semicooked_message_t *msg;
-	buffer_t *hdr;
-
-	if (!queue_peek(q, fixed_header, sizeof(fixed_header)))
-		return NULL;
-
-	if (fixed_header[0] != dbus_host_endianness)
-		log_fatal("bad endianness %c", fixed_header[0]);
-
-	if (fixed_header[3] != 1)
-		log_fatal("bad protocol major version %u", fixed_header[3]);
-
-	memcpy(&payload_len, &fixed_header[4], 4);
-	memcpy(&msg_seq, &fixed_header[8], 4);
-	memcpy(&header_len, &fixed_header[12], 4);
-
-	trace_message_ep(ep, "message seq %u: header_len %u payload_len %u", msg_seq, header_len, payload_len);
-
-	if (!(hdr = queue_peek_buffer(q, sizeof(fixed_header) + header_len)))
-		return NULL; /* not yet complete */
-
-	msg = dbus_semicooked_message_new();
-	if (!dbus_semicooked_message_parse_header(hdr, msg)) {
-		/* should be destructive */
-		log_fatal("unable to parse dbus header");
-		return NULL;
-	}
-
-	buffer_free(hdr);
-
-	total_header_size = align8(sizeof(fixed_header) + header_len);
-	payload_alignment = 0;
-	if (true) {
-		unsigned int over;
-
-		over = (sizeof(fixed_header) + header_len) % 8;
-		if (over != 0)
-			payload_alignment = 8 - over;
-	}
-
-	total_msg_size = total_header_size + payload_len;
-
-	/* Make sure that we have the complete message sitting in the queue before
-	 * we proceed.
-	 */
-	if (q->size < total_msg_size) {
-		// dbus_debug(dbus, "incomplete message, need %u bytes", total_msg_size);
-		dbus_semicooked_message_free(msg);
-		return NULL;
-	}
-
-	/* Just skip over the header, we've processed it already */
-	if (!queue_skip(q, total_header_size))
-		log_fatal("bug in %s", __func__);
-
-	/* Now, grab the payload.
-	 * Note, there never seems to be padding after the end of the payload. So
-	 * if the payload ends at stream position 91, then the next header will follow
-	 * immediately.
-	 */
-	if (!(msg->msg_payload = queue_get_buffer(q, payload_len))) {
-		/* This should not happen, as we've made sure we have the whole message
-		 * sitting in the queue. */
-		log_fatal("bug in %s", __func__);
-	}
-
-	// dbus_debug(dbus, "Processed complete message");
-	return msg;
-}
-
-static dbus_semicooked_message_t *
-dbus_semicooked_message_dissect(dbus_client_t *dbus, endpoint_t *ep, queue_t *q)
-{
-	unsigned char fixed_header[12 + 4];	/* fixed header + header field array length */
-	uint32_t msg_seq, payload_len, header_len, payload_alignment, total_msg_size;
-	dbus_semicooked_message_t *msg;
-	buffer_t *hdr;
-
-	if (!queue_peek(q, fixed_header, sizeof(fixed_header)))
-		return NULL;
-
-	if (fixed_header[0] != dbus->endianness) {
-		/* should be destructive */
-		endpoint_error(ep, "bad endianness %c", fixed_header[0]);
-		return NULL;
-	}
-
-	if (fixed_header[3] != 1) {
-		/* should be destructive */
-		endpoint_error(ep, "bad protocol major version %u", fixed_header[3]);
-		return NULL;
-	}
-
-	memcpy(&payload_len, &fixed_header[4], 4);
-	memcpy(&msg_seq, &fixed_header[8], 4);
-	memcpy(&header_len, &fixed_header[12], 4);
-
-	trace_message_ep(ep, "message seq %u: header_len %u payload_len %u", msg_seq, header_len, payload_len);
-
-	if (!(hdr = queue_peek_buffer(q, sizeof(fixed_header) + header_len)))
-		return NULL; /* not yet complete */
-
-	msg = dbus_semicooked_message_new();
-	if (!dbus_semicooked_message_parse_header(hdr, msg)) {
-		/* should be destructive */
-		endpoint_error(ep, "unable to parse dbus header");
-		return NULL;
-	}
-
-	buffer_free(hdr);
-
-	payload_alignment = 0;
-	if (true) {
-		unsigned int over;
-
-		over = (sizeof(fixed_header) + header_len) % 8;
-		if (over != 0)
-			payload_alignment = 8 - over;
-	}
-
-	total_msg_size = sizeof(fixed_header) + header_len + payload_alignment + payload_len;
-
-	/* Make sure that we have the complete message sitting in the queue before
-	 * we proceed.
-	 */
-	if (q->size < total_msg_size) {
-		dbus_debug(dbus, "incomplete message, need %u bytes", total_msg_size);
-		dbus_semicooked_message_free(msg);
-		return NULL;
-	}
-
-	/* Just skip over the header, we've processed it already */
-	if (!queue_skip(q, sizeof(fixed_header) + header_len + payload_alignment)) {
-		log_fatal("bug in %s", __func__);
-	}
-
-	// __dbus_message_display_next(&q->head->buf);
-
-	/* Now, grab the payload.
-	 * Note, there never seems to be padding after the end of the payload. So
-	 * if the payload ends at stream position 91, then the next header will follow
-	 * immediately.
-	 */
-	if (!(msg->msg_payload = queue_get_buffer(q, payload_len))) {
-		/* This should not happen, as we've made sure we have the whole message
-		 * sitting in the queue. */
-		log_fatal("bug in %s", __func__);
-	}
-
-	// dbus_debug(dbus, "Processed complete message");
-	return msg;
-}
-#endif
 
 static dbus_forwarding_port_t *
 dbus_forwarding_port_new(const char *name)
@@ -1663,7 +943,7 @@ dbus_forwarder_recv(dbus_forwarding_port_t *fwport)
 	return true;
 }
 
-static inline bool
+static bool
 dbus_forwarding_port_poll(dbus_forwarding_port_t *fwport, struct pollfd *p, dbus_forwarding_port_t **port_p)
 {
 	*port_p = fwport;
