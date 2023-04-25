@@ -44,7 +44,7 @@ typedef struct dbus_timer	dbus_timer_t;
 
 typedef const struct dbus_client_ops dbus_client_ops_t;
 
-extern bool			dbus_bridge_port_acquire_name(dbus_bridge_port_t *port, const char *name);
+extern bool			dbus_bridge_port_activate_proxy(dbus_bridge_port_t *port, const char *name);
 extern void			dbus_bridge_port_event_name_lost(dbus_bridge_port_t *port, const char *name);
 extern void			dbus_bridge_port_event_name_acquired(dbus_bridge_port_t *port, const char *name);
 static bool			dbus_service_proxy_connect(dbus_service_proxy_t *proxy, dbus_bridge_port_t *port);
@@ -101,6 +101,7 @@ struct dbus_service_proxy {
 	char *			name;
 	char *			log_name;
 
+	bool			enabled;
 	pid_t			pid;
 };
 
@@ -115,10 +116,6 @@ struct dbus_bridge_port {
 	dbus_client_t *		monitor;
 
 	dbus_bridge_port_t *	other;
-
-	/* On the upstream port, this is a list of names that
-	 * we want to create proxies for */
-	struct strutil_array	names_to_publish;
 
 	/* On the downstream port, this is the list of proxies
 	 * we actually have active. */
@@ -480,7 +477,7 @@ dbus_bridge_process_registered_names(dbus_client_t *dbus, const char **names, un
 {
 	dbus_bridge_port_t *port = dbus->impl.data;
 
-	if (port == NULL || port->names_to_publish.count == 0)
+	if (port == NULL)
 		return;
 
 	while (count--) {
@@ -519,7 +516,7 @@ __dbus_monitor_reconnect(dbus_bridge_port_t *port)
 
 	/* Loop over all proxies and reconnect those as well. */
 	for (proxy = port->service_proxies; proxy; proxy = proxy->next) {
-		if (proxy->pid < 0)
+		if (proxy->enabled && proxy->pid < 0)
 			dbus_service_proxy_connect(proxy, port);
 	}
 
@@ -788,12 +785,6 @@ dbus_bridge_port_new(const char *name, const char *bus_address)
 	return port;
 }
 
-void
-dbus_bridge_port_publish(dbus_bridge_port_t *port, const char *name)
-{
-	strutil_array_append(&port->names_to_publish, name);
-}
-
 bool
 dbus_bridge_port_monitor(dbus_bridge_port_t *port, bool deferred)
 {
@@ -860,21 +851,43 @@ dbus_bridge_port_list_names(dbus_bridge_port_t *port)
 	return true;
 }
 
-bool
-dbus_bridge_port_acquire_name(dbus_bridge_port_t *port, const char *name)
+static dbus_service_proxy_t *
+__dbus_bridge_port_get_proxy(dbus_bridge_port_t *port, const char *name, bool create)
 {
 	dbus_service_proxy_t **pos, *proxy;
 
 	for (pos = &port->service_proxies; (proxy = *pos) != NULL; pos = &proxy->next) {
-		if (!strcmp(proxy->name, name)) {
-			log_debug("%s: already have a proxy for %s", port->name, name);
-			break;
-		}
+		if (!strcmp(proxy->name, name))
+			return proxy;
 	}
 
-	if (proxy == NULL)
+	if (proxy == NULL && create)
 		*pos = proxy = dbus_service_proxy_new(name, port->bus_address);
 
+	return proxy;
+}
+
+static dbus_service_proxy_t *
+dbus_bridge_port_create_proxy(dbus_bridge_port_t *port, const char *name)
+{
+	return __dbus_bridge_port_get_proxy(port, name, true);
+}
+
+static dbus_service_proxy_t *
+dbus_bridge_port_find_proxy(dbus_bridge_port_t *port, const char *name)
+{
+	return __dbus_bridge_port_get_proxy(port, name, false);
+}
+
+bool
+dbus_bridge_port_activate_proxy(dbus_bridge_port_t *port, const char *name)
+{
+	dbus_service_proxy_t *proxy;
+
+	if (!(proxy = dbus_bridge_port_find_proxy(port, name)))
+		return false;
+
+	proxy->enabled = true;
 	if (!dbus_service_proxy_connect(proxy, port)) {
 		log_error("Unable to establish a %s proxy connection for %s", port->name, proxy->name);
 		return false;
@@ -890,8 +903,9 @@ dbus_bridge_port_release_name(dbus_bridge_port_t *port, const char *name)
 
 	for (pos = &port->service_proxies; (proxy = *pos) != NULL; pos = &proxy->next) {
 		if (!strcmp(proxy->name, name)) {
-			log_debug("%s: deactivating proxy for %s", port->name, name);
+			log_debug("%s: disabling proxy for %s", port->name, name);
 			dbus_service_proxy_stop(proxy);
+			proxy->enabled = false;
 			break;
 		}
 	}
@@ -909,11 +923,12 @@ dbus_bridge_port_event_name_lost(dbus_bridge_port_t *port, const char *name)
 void
 dbus_bridge_port_event_name_acquired(dbus_bridge_port_t *port, const char *name)
 {
-	if (port->other == NULL)
+	dbus_bridge_port_t *downstream;
+
+	if ((downstream = port->other) == NULL)
 		return;
 
-	if (strutil_array_contains(&port->names_to_publish, name))
-		dbus_bridge_port_acquire_name(port->other, name);
+	dbus_bridge_port_activate_proxy(downstream, name);
 }
 
 int
@@ -932,12 +947,12 @@ main(int argc, char **argv)
 	port_upstream->other = port_downstream;
 	port_downstream->other = port_upstream;
 
-	dbus_bridge_port_publish(port_upstream, "org.freedesktop.NetworkManager");
+	dbus_bridge_port_create_proxy(port_downstream, "org.freedesktop.NetworkManager");
 #if 0
-	dbus_bridge_port_publish(port_upstream, "org.fedoraproject.FirewallD1");
-	dbus_bridge_port_publish(port_upstream, "net.hadess.PowerProfiles");
+	dbus_bridge_port_create_proxy(port_downstream, "org.fedoraproject.FirewallD1");
+	dbus_bridge_port_create_proxy(port_downstream, "net.hadess.PowerProfiles");
 #endif
-	dbus_bridge_port_publish(port_upstream, "com.intel.tss2.Tabrmd");
+	dbus_bridge_port_create_proxy(port_downstream, "com.intel.tss2.Tabrmd");
 
 	if (1) {
 		if (!dbus_bridge_port_monitor(port_downstream, true))
