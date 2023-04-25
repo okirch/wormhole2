@@ -1061,7 +1061,7 @@ dbus_forwarder_eventloop(dbus_forwarder_t *fwd)
 		if (r != 0) {
 			for (i = 0; i < nfds; ++i) {
 				if (!dbus_forwarding_port_doio(fwport[i], &pfd[i])) {
-					log_error("end forwarding");
+					log_debug_id(fwd->name, "end forwarding");
 					return;
 				}
 			}
