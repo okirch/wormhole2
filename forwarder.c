@@ -53,6 +53,7 @@ typedef struct dbus_pending_call dbus_pending_call_t;
 typedef struct dbus_semicooked_message dbus_semicooked_message_t;
 
 static uint8_t			dbus_host_endianness = 'l';
+static const unsigned int	dbus_header_field_padding = 8;
 
 
 struct dbus_forwarding_port {
@@ -177,7 +178,7 @@ __dbus_finalize_header(buffer_t *hdr)
 	hfa_len_pointer = (uint32_t *) (hdr->data + hdr->rpos + 12);
 	*hfa_len_pointer = buffer_available(hdr) - 12 - 4;
 
-	return buffer_put_padding(hdr, 8);
+	return buffer_put_padding(hdr, dbus_header_field_padding);
 }
 
 static dbus_semicooked_message_t *
@@ -366,7 +367,7 @@ __dbus_message_patch_begin(const struct buffer_segment *where, buffer_t *bp, buf
 	if (orig->rpos > where->offset)
 		return false;
 
-	if (!buffer_put_padding(bp, 4))
+	if (!buffer_put_padding(bp, dbus_header_field_padding))
 		return false;
 
 	if (!buffer_copy(orig, where->offset - orig->rpos, bp))
@@ -395,7 +396,7 @@ __dbus_message_header_get_string(buffer_t *bp, char field_type, struct dbus_head
 
 	/* If we're not at the end of the header array, consume any padding between
 	 * this header field and the next. */
-	if (buffer_available(bp) && !buffer_consume_padding(bp, 4))
+	if (buffer_available(bp) && !buffer_consume_padding(bp, dbus_header_field_padding))
 		return false;
 
 	__dbus_message_segment_end(&var->where, bp);
@@ -715,7 +716,7 @@ dbus_build_patched_header(dbus_semicooked_message_t *msg)
 
 	remaining = buffer_available(orig_hdr);
 	if (remaining) {
-		if (!buffer_put_padding(hdr, 4)
+		if (!buffer_put_padding(hdr, 8)
 		 || !buffer_copy(orig_hdr, remaining, hdr))
 			goto failed;
 	}
