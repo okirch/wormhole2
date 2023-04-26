@@ -20,13 +20,15 @@
  * This takes care of spawning the appropriate forwarding processes.
  */
 
+#include <sys/poll.h>
+#include <sys/time.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <assert.h>
 #include <stdarg.h>
 #include <stdlib.h>
-#include <sys/poll.h>
-#include <sys/time.h>
+#include <getopt.h>
+#include <ctype.h>
 #include <systemd/sd-bus.h>
 #include <systemd/sd-event.h>
 
@@ -1096,43 +1098,152 @@ install_sigchld_handler(dbus_bridge_port_t *port)
 	return true;
 }
 
+static struct option	long_options[] = {
+	{ "debug",		no_argument,		NULL,		'd' },
+	{ "upstream-socket",	required_argument,	NULL,		'U' },
+	{ "downstream-socket",	required_argument,	NULL,		'D' },
+	{ "config",		required_argument,	NULL,		'C' },
+	{ NULL, }
+};
+
+struct config {
+	char *			upstream_socket;
+	char *			downstream_socket;
+
+	struct strutil_array	services;
+};
+
+static char *
+strip(char *word)
+{
+	unsigned int n;
+
+	if (word == NULL)
+		return NULL;
+
+	/* trim white space left */
+	while (isspace(*word))
+		++word;
+
+	n = strlen(word);
+	if (n == 0)
+		return NULL;
+
+	/* trim white space right */
+	while (n && isspace(word[n-1]))
+		word[--n] = '\0';
+
+	return word;
+}
+
+static bool
+parse_config_file(struct config *cfg, const char *pathname)
+{
+	char linebuf[1024];
+	FILE *fp;
+
+	if (!(fp = fopen(pathname, "r"))) {
+		log_error("Unable to open %s: %m", pathname);
+		return false;
+	}
+
+	while (fgets(linebuf, sizeof(linebuf), fp)) {
+		char *kwd, *value;
+
+		linebuf[strcspn(linebuf, "\r\n#")] = '\0';
+
+		kwd = strip(strtok(linebuf, "="));
+		value = strip(strtok(NULL, ""));
+
+		if (kwd == NULL)
+			continue;
+		if (value == NULL) {
+			log_error("%s: keyword %s lacks argument", pathname, kwd);
+			goto failed;
+		}
+
+		if (!strcmp(kwd, "upstream-socket"))
+			strutil_set(&cfg->upstream_socket, value);
+		else if (!strcmp(kwd, "downstream-socket"))
+			strutil_set(&cfg->downstream_socket, value);
+		else if (!strcmp(kwd, "service"))
+			strutil_array_append(&cfg->services, value);
+		else {
+			log_error("%s: unknown keyword %s", pathname, kwd);
+			goto failed;
+		}
+	}
+
+	fclose(fp);
+	return true;
+
+failed:
+	fclose(fp);
+	return false;
+}
+
 int
 main(int argc, char **argv)
 {
+	struct config config;
 	dbus_bridge_port_t *port_upstream, *port_downstream;
 	sd_event *event = NULL;
+	unsigned int i;
+	int c;
 
-	tracing_set_level(1);
+	memset(&config, 0, sizeof(config));
+
+	while ((c = getopt_long(argc, argv, "dC:D:U:", long_options, NULL)) != EOF) {
+		switch (c) {
+		case 'd':
+			tracing_increment_level();
+			break;
+
+		case 'C':
+			if (!parse_config_file(&config, optarg))
+				return 1;
+			break;
+
+		case 'D':
+			strutil_set(&config.downstream_socket, optarg);
+			break;
+
+		case 'U':
+			strutil_set(&config.upstream_socket, optarg);
+			break;
+
+		default:
+			log_error("Unknown option");
+			exit(1);
+		}
+	}
+
+	if (config.services.count == 0)
+		log_fatal("No service names configured");
+	if (config.downstream_socket == NULL)
+		log_fatal("No downstream name configured");
 
 	if (sd_event_default(&event) < 0)
 		log_fatal("Unable to create sd-event loop");
 
-	port_upstream = dbus_bridge_port_new("upstream", NULL);
-	port_downstream = dbus_bridge_port_new("downstream", "/tmp/downstream");
+	port_upstream = dbus_bridge_port_new("upstream", config.upstream_socket);
+	port_downstream = dbus_bridge_port_new("downstream", config.downstream_socket);
 	port_upstream->other = port_downstream;
 	port_downstream->other = port_upstream;
 
-	dbus_bridge_port_create_proxy(port_downstream, "org.freedesktop.NetworkManager");
-#if 0
-	dbus_bridge_port_create_proxy(port_downstream, "org.fedoraproject.FirewallD1");
-	dbus_bridge_port_create_proxy(port_downstream, "net.hadess.PowerProfiles");
-#endif
-	dbus_bridge_port_create_proxy(port_downstream, "com.intel.tss2.Tabrmd");
+	for (i = 0; i < config.services.count; ++i)
+		dbus_bridge_port_create_proxy(port_downstream, config.services.data[i]);
 
 	if (!install_sigchld_handler(port_downstream))
 		return 1;
 
-	if (1) {
-		if (!dbus_bridge_port_monitor(port_downstream, true))
-			return 1;
-	}
+	if (!dbus_bridge_port_monitor(port_downstream, true))
+		return 1;
 
-	if (1) {
-		if (!dbus_bridge_port_monitor(port_upstream, false))
-			return 1;
+	if (!dbus_bridge_port_monitor(port_upstream, false))
+		return 1;
 
-		dbus_bridge_port_list_names(port_upstream);
-	}
+	dbus_bridge_port_list_names(port_upstream);
 
 	sd_event_loop(event);
 	return 0;
