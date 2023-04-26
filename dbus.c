@@ -504,10 +504,10 @@ dbus_timer_get_remaining(const dbus_timer_t *timer)
  * Create a timer connected to a bridge port
  */
 static void
-dbus_bridge_add_timer(dbus_bridge_port_t *port, unsigned long timeout_ms, int (*callback)(dbus_bridge_port_t *))
+dbus_bridge_add_timer(dbus_bridge_port_t *port, unsigned long timeout_usec, int (*callback)(dbus_bridge_port_t *))
 {
 	if (port->reconnect_timer == NULL)
-		port->reconnect_timer = dbus_timer_new(timeout_ms, (dbus_timer_callback_fn_t *) callback, port);
+		port->reconnect_timer = dbus_timer_new(timeout_usec, (dbus_timer_callback_fn_t *) callback, port);
 	else
 		dbus_timer_restart(port->reconnect_timer);
 }
@@ -662,17 +662,18 @@ dbus_service_proxy_new(dbus_bridge_port_t *port, const char *name)
 	return proxy;
 }
 
-static void
+static bool
 __dbus_service_proxy_configure_port(dbus_service_proxy_t *proxy, dbus_forwarding_port_t *port, dbus_client_t *dbus)
 {
 	if (dbus == NULL) {
 		log_error_id(proxy->log_name, "unable to connect %s", dbus_forwarding_port_get_name(port));
-		exit(1);
+		return false;
 	}
 
 	// log_debug_id(proxy->log_name, "Configuring port %s", dbus_forwarding_port_get_name(port));
 	dbus_forwarding_port_set_bus_name(port, dbus->bus_name);
 	dbus_forwarding_port_set_socket(port, sd_bus_get_fd(dbus->h));
+	return true;
 }
 
 static void
@@ -780,11 +781,11 @@ dbus_service_proxy_start(dbus_service_proxy_t *proxy)
 	/* we're the child process */
 	fwd = dbus_forwarder_new(proxy->log_name);
 
-	__dbus_service_proxy_configure_port(proxy, dbus_forwarder_get_upstream(fwd),
-			dbus_service_proxy_connect_upstream(proxy, port->other));
-
-	__dbus_service_proxy_configure_port(proxy, dbus_forwarder_get_downstream(fwd),
-			dbus_service_proxy_connect_downstream(proxy, port));
+	if (!__dbus_service_proxy_configure_port(proxy, dbus_forwarder_get_upstream(fwd),
+			dbus_service_proxy_connect_upstream(proxy, port->other))
+	 || !__dbus_service_proxy_configure_port(proxy, dbus_forwarder_get_downstream(fwd),
+			dbus_service_proxy_connect_downstream(proxy, port)))
+		exit(1);
 
 	dbus_forwarder_eventloop(fwd);
 
@@ -811,10 +812,7 @@ dbus_service_proxy_connect(dbus_service_proxy_t *proxy)
 	(void) dbus_service_proxy_stop(proxy);
 
 	log_debug("Trying to create a proxy for %s on port %s", proxy->name, port->name);
-	ok = dbus_service_proxy_start(proxy);
-
-
-	if (!ok) {
+	if (!dbus_service_proxy_start(proxy)) {
 		log_error_id(proxy->name, "unable to create forwarding process");
 		/* mark this proxy as failed */
 	}
@@ -823,29 +821,56 @@ dbus_service_proxy_connect(dbus_service_proxy_t *proxy)
 }
 
 static void
-dbus_service_proxy_add_timer(dbus_service_proxy_t *proxy, unsigned long timeout_ms, int (*callback)(dbus_service_proxy_t *))
+dbus_service_proxy_add_timer(dbus_service_proxy_t *proxy, unsigned long timeout_usec, int (*callback)(dbus_service_proxy_t *))
 {
-	if (proxy->restart_timer == NULL)
-		proxy->restart_timer = dbus_timer_new(timeout_ms, (dbus_timer_callback_fn_t *) callback, proxy);
-	else
+	if (proxy->restart_timer == NULL) {
+		proxy->restart_timer = dbus_timer_new(timeout_usec, (dbus_timer_callback_fn_t *) callback, proxy);
+	} else
+	if (dbus_timer_is_active(proxy->restart_timer)) {
+		/* Do not reset the timer when it's running.
+		 * Otherwise, a segfault/bug in the forwarder startup code will result
+		 * in us respawning the forwarder in a tight loop. */
+		log_debug_id(proxy->log_name, "will retry in %g seconds",
+				dbus_timer_get_remaining(proxy->restart_timer));
+	} else {
 		dbus_timer_restart(proxy->restart_timer);
+	}
 }
 
 static int
 __dbus_service_proxy_restart(dbus_service_proxy_t *proxy)
 {
-	if (!dbus_service_proxy_connect(proxy))
-		return 1; /* returning non-zero means keep trying */
+	/* The way this is intended to work is this:
+	 *  - we receive SIGCHLD notification that a forwarder died
+	 *  - we schedule a timer (so that it fires immediately) and end
+	 *    up in this callback.
+	 *  - proxy->pid is 0, so we try to restart the forwarder
+	 *  - we return 1 to indicate that the timer should be rescheduled.
+	 *
+	 * If the forwarder starts up OK, proxy->pid will still hold a valid PID
+	 * by the time we return here. In this case, we declare victory and
+	 * stop the timer.
+	 *
+	 * If the forwarder dies during startup:
+	 *  - we receive another SIGCHLD, and clear proxy->pid. We do not
+	 *    restart the timer
+	 *  - when the timer fires eventually, we will come back here,
+	 *    and try restart the forwarder again.
+	 *  - we return 1 so that the timer is rescheduled, with exponential
+	 *    backoff.
+	 */
+	if (proxy->pid > 0) {
+		log_debug_id(proxy->log_name, "forwarder startup was successful");
+		return 0;
+	}
 
-	return 0;
+	(void) dbus_service_proxy_connect(proxy);
+	return 1;
 }
 
 static void
 dbus_service_proxy_attempt_restart(dbus_service_proxy_t *proxy)
 {
-	/* FIXME: we should not reset the timer when it's running.
-	 * Otherwise, a segfault/bug in the forwarder startup code will result
-	 * in us respawning the forwarder in a tight loop. */
 	dbus_service_proxy_add_timer(proxy, 1000000, __dbus_service_proxy_restart);
 }
 
