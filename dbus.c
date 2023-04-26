@@ -26,6 +26,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <sys/poll.h>
+#include <sys/time.h>
 #include <systemd/sd-bus.h>
 #include <systemd/sd-event.h>
 
@@ -76,8 +77,9 @@ struct dbus_client_ops {
 
 typedef int			dbus_timer_callback_fn_t(void *);
 struct dbus_timer {
-	unsigned long		initial_timeout_ms;
-	unsigned long		current_timeout_ms;
+	unsigned long		initial_timeout_usec;
+	unsigned long		current_timeout_usec;
+	struct timeval		expiry_date;
 	sd_event_source *	event_source;
 	dbus_timer_callback_fn_t *callback;
 	void *			userdata;
@@ -399,6 +401,19 @@ dbus_free_string_array(char **array)
 /*
  * Timers
  */
+static double dbus_timer_get_remaining(const dbus_timer_t *timer);
+static inline void
+__dbus_timer_set_expiry(dbus_timer_t *timer, unsigned int timeout_usec)
+{
+	struct timeval now, delta;
+
+	gettimeofday(&now, NULL);
+
+	delta.tv_sec = timeout_usec / 1000000;
+	delta.tv_usec = timeout_usec % 1000000;
+	timeradd(&now, &delta, &timer->expiry_date);
+}
+
 static int
 __dbus_timer_callback(sd_event_source *s, uint64_t usec, void *userdata)
 {
@@ -410,35 +425,40 @@ __dbus_timer_callback(sd_event_source *s, uint64_t usec, void *userdata)
 		return 0;
 	}
 
-	if (timer->current_timeout_ms == 0) {
-		timer->current_timeout_ms = timer->initial_timeout_ms;
+	if (timer->current_timeout_usec == 0) {
+		timer->current_timeout_usec = timer->initial_timeout_usec;
 	} else {
-		timer->current_timeout_ms <<= 1;
-		if (timer->current_timeout_ms > max_backoff)
-			timer->current_timeout_ms = max_backoff;
+		timer->current_timeout_usec <<= 1;
+		if (timer->current_timeout_usec > max_backoff)
+			timer->current_timeout_usec = max_backoff;
 	}
 
 	/* Come back after the specified timeout */
-	sd_event_source_set_time_relative(timer->event_source, timer->current_timeout_ms);
+	sd_event_source_set_time_relative(timer->event_source, timer->current_timeout_usec);
+	__dbus_timer_set_expiry(timer, timer->current_timeout_usec);
 	return 1;
 }
 
-
 static dbus_timer_t *
-dbus_timer_new(unsigned long timeout_ms, dbus_timer_callback_fn_t *callback, void *userdata)
+dbus_timer_new(unsigned long timeout_usec, dbus_timer_callback_fn_t *callback, void *userdata)
 {
 	dbus_timer_t *timer;
 	sd_event *event;
 
 	timer = calloc(1, sizeof(*timer));
-	timer->initial_timeout_ms = timeout_ms;
+	timer->current_timeout_usec = 0;		/* the first time around, the timer will fire immediately */
+	timer->initial_timeout_usec = timeout_usec;
 	timer->callback = callback;
 	timer->userdata = userdata;
 
 	if (sd_event_default(&event) < 0)
 		log_fatal("sd_event_default failed");
 
-	sd_event_add_time_relative(event, &timer->event_source, CLOCK_MONOTONIC, 0, timeout_ms / 10, __dbus_timer_callback, timer);
+	sd_event_add_time_relative(event, &timer->event_source, CLOCK_MONOTONIC,
+				timer->current_timeout_usec, timeout_usec / 10,
+				__dbus_timer_callback, timer);
+	__dbus_timer_set_expiry(timer, timer->current_timeout_usec);
+
 	sd_event_source_set_enabled(timer->event_source, SD_EVENT_ON);
 	return timer;
 }
@@ -451,7 +471,33 @@ dbus_timer_restart(dbus_timer_t *timer)
 	/* re-enable the timer and ensure it fires immediately */
 	sd_event_source_set_enabled(timer->event_source, SD_EVENT_ON);
 	sd_event_source_set_time_relative(timer->event_source, 0);
-	timer->current_timeout_ms = 0;
+	__dbus_timer_set_expiry(timer, 0);
+	timer->current_timeout_usec = 0;
+}
+
+static bool
+dbus_timer_is_active(const dbus_timer_t *timer)
+{
+	int enabled;
+
+	if (sd_event_source_get_enabled(timer->event_source, &enabled) < 0)
+		return false;
+
+	return enabled == SD_EVENT_ON;
+}
+
+static double
+dbus_timer_get_remaining(const dbus_timer_t *timer)
+{
+	struct timeval now, remain;
+
+	if (!dbus_timer_is_active(timer))
+		return 100e6;
+
+	gettimeofday(&now, NULL);
+	timersub(&timer->expiry_date, &now, &remain);
+
+	return remain.tv_sec + 1e-6 * remain.tv_usec;
 }
 
 /*
