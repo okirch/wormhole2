@@ -546,7 +546,7 @@ wormhole_context_set_boot(struct wormhole_context *ctx, const char *name)
 	if ((options = strchr(copy, ';')) != NULL)
 		*options++ = '\0';
 
-	ctx->boot.mount_detail = fsutil_mount_detail_new(copy, NULL, options);
+	ctx->boot.mount_detail = fsutil_mount_detail_new(NULL, copy, options);
 	strutil_drop(&copy);
 }
 
@@ -811,6 +811,7 @@ identify_os(const char *root_dir)
 
 		log_info("Found installation of %s", os_name);
 		found = true;
+		break;
 	}
 
 	fclose(fp);

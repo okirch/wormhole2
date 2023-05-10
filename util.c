@@ -741,6 +741,10 @@ fsutil_make_thing(const char *path, int mode, int (*createfn)(const char *path, 
 
 	if (errno == EEXIST) {
 		if (chmod(path, mode) < 0) {
+			if (errno == EROFS) {
+				log_warning("cannot change mode on %s: %m", path);
+				return true;
+			}
 			log_error("cannot change mode on %s: %m", path);
 			return false;
 		}
@@ -1920,9 +1924,13 @@ fsutil_resolve_fsuuid(const char *uuid)
 bool
 fsutil_mount_options_contain(const char *options, const char *word)
 {
-	char *copy = strdup(options), *s;
+	char *copy, *s;
 	bool found = false;
 
+	if (options == NULL)
+		return false;
+
+	copy = strdup(options);
 	for (s = strtok(copy, ","); s && !found; s = strtok(NULL, ","))
 		found = !strcmp(s, word);
 
