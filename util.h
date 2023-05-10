@@ -162,6 +162,8 @@ extern bool			fsutil_dir_is_mountpoint(const char *path);
 extern const char *		fsutil_makedir2(const char *parent, const char *name);
 extern const char *		fsutil_makefile2(const char *parent, const char *name);
 extern bool			fsutil_copy_file(const char *system_path, const char *image_path, const struct stat *st);
+extern char *			fsutil_resolve_fsuuid(const char *uuid);
+extern bool			fsutil_mount_options_contain(const char *options, const char *word);
 
 enum {
 	FSUTIL_MTAB_ITERATOR = 1,

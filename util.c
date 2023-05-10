@@ -1905,6 +1905,31 @@ fsutil_lazy_umount(const char *path)
 	return true;
 }
 
+char *
+fsutil_resolve_fsuuid(const char *uuid)
+{
+	char pathbuf[PATH_MAX], resolved_path[PATH_MAX];
+
+	snprintf(pathbuf, sizeof(pathbuf), "/dev/disk/by-uuid/%s", uuid);
+	if (realpath(pathbuf, resolved_path) == NULL)
+		return NULL;
+
+	return strdup(resolved_path);
+}
+
+bool
+fsutil_mount_options_contain(const char *options, const char *word)
+{
+	char *copy = strdup(options), *s;
+	bool found = false;
+
+	for (s = strtok(copy, ","); s && !found; s = strtok(NULL, ","))
+		found = !strcmp(s, word);
+
+	free(copy);
+	return found;
+}
+
 bool
 fsutil_make_fs_private(const char *dir, bool maybe_in_chroot)
 {
