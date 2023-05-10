@@ -50,7 +50,8 @@ typedef const struct mount_ops {
 	bool			(*mount)(const struct fstree_node *);
 } mount_ops_t;
 
-struct system_mount {
+typedef struct fsutil_mount_detail fsutil_mount_detail_t;
+struct fsutil_mount_detail {
 	unsigned int	refcount;
 	char *		fstype;
 	char *		fsname;
@@ -81,7 +82,7 @@ struct fstree_node {
 	char *		mountpoint;
 
 	mount_ops_t *	mount_ops;
-	struct system_mount *system;
+	fsutil_mount_detail_t *mount_detail;
 
 	struct wormhole_layer *bind_mount_override_layer;
 	struct wormhole_layer_array attached_layers;
@@ -270,9 +271,9 @@ fstree_node_fstype(const struct fstree_node *node)
 	return node->mount_ops? node->mount_ops->name : NULL;
 }
 
-extern struct system_mount *	system_mount_new(const char *fstype, const char *fsname, const char *options);
-extern struct system_mount *	system_mount_hold(struct system_mount *md);
-extern void			system_mount_release(struct system_mount *md);
+extern fsutil_mount_detail_t *	fsutil_mount_detail_new(const char *fstype, const char *fsname, const char *options);
+extern fsutil_mount_detail_t *	fsutil_mount_detail_hold(fsutil_mount_detail_t *md);
+extern void			fsutil_mount_detail_release(fsutil_mount_detail_t *md);
 
 extern void			wormhole_layer_set_default_search_path(void);
 extern void			wormhole_layer_print_default_search_path(void);

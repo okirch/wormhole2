@@ -252,44 +252,44 @@ fsutil_dir_is_mountpoint(const char *path)
  * mount details as found in fstab and mtab
  * FIXME: these don't really belong here.
  */
-struct system_mount *
-system_mount_new(const char *fstype, const char *fsname, const char *options)
+fsutil_mount_detail_t *
+fsutil_mount_detail_new(const char *fstype, const char *fsname, const char *options)
 {
-	struct system_mount *sm;
+	fsutil_mount_detail_t *md;
 
-	sm = calloc(1, sizeof(*sm));
+	md = calloc(1, sizeof(*md));
 
-	sm->refcount = 1;
-	strutil_set(&sm->fstype, fstype);
-	strutil_set(&sm->fsname, fsname);
-	strutil_set(&sm->options, options);
+	md->refcount = 1;
+	strutil_set(&md->fstype, fstype);
+	strutil_set(&md->fsname, fsname);
+	strutil_set(&md->options, options);
 
-	return sm;
+	return md;
 }
 
-struct system_mount *
-system_mount_hold(struct system_mount *sm)
+fsutil_mount_detail_t *
+fsutil_mount_detail_hold(fsutil_mount_detail_t *md)
 {
-	if (sm != NULL) {
-		if (!sm->refcount)
+	if (md != NULL) {
+		if (!md->refcount)
 			log_fatal("%s: refcount == 0", __func__);
-		sm->refcount += 1;
+		md->refcount += 1;
 	}
-	return sm;
+	return md;
 }
 
 void
-system_mount_release(struct system_mount *sm)
+fsutil_mount_detail_release(fsutil_mount_detail_t *md)
 {
-	if (!sm->refcount)
+	if (!md->refcount)
 		log_fatal("%s: refcount == 0", __func__);
 
-	if (--(sm->refcount))
+	if (--(md->refcount))
 		return;
 
-	strutil_drop(&sm->fstype);
-	strutil_drop(&sm->fsname);
-	strutil_drop(&sm->options);
-	strutil_array_destroy(&sm->overlay_dirs);
-	free(sm);
+	strutil_drop(&md->fstype);
+	strutil_drop(&md->fsname);
+	strutil_drop(&md->options);
+	strutil_array_destroy(&md->overlay_dirs);
+	free(md);
 }

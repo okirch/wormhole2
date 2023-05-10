@@ -93,14 +93,14 @@ system_mount_tree_maybe_add_transparent(struct fstree *fstree, const fsutil_moun
 		return false;
 	}
 
-	if (node->system) {
+	if (node->mount_detail) {
 		/* It's a setup problem for the system, but not a problem for us as we just bind mount
 		 * what's there. */
-		log_warning("%s: duplicate system mount (%s and %s)", cursor->mountpoint, node->system->fstype, cursor->fstype);
+		log_warning("%s: duplicate system mount (%s and %s)", cursor->mountpoint, node->mount_detail->fstype, cursor->fstype);
 		return false;
 	}
 
-	node->system = system_mount_new(cursor->fstype, cursor->fsname, cursor->options);
+	node->mount_detail = fsutil_mount_detail_new(cursor->fstype, cursor->fsname, cursor->options);
 	node->mount_ops = &mount_ops_bind;
 
 	return true;
@@ -172,15 +172,15 @@ system_mount_tree_discover_boot(struct fstree *fstree)
 			return false;
 
 		strutil_set(&node->mountpoint, node->relative_path);
-		node->system = system_mount_new(cursor.fstype, cursor.fsname, cursor.options);
+		node->mount_detail = fsutil_mount_detail_new(cursor.fstype, cursor.fsname, cursor.options);
 
 		if (!strncmp(cursor.fsname, "UUID=", 5)) {
 			char *real_device;
 
 			real_device = fsutil_resolve_fsuuid(cursor.fsname + 5);
 			if (real_device) {
-				strutil_drop(&node->system->fsname);
-				node->system->fsname = real_device;
+				strutil_drop(&node->mount_detail->fsname);
+				node->mount_detail->fsname = real_device;
 				node->mount_ops = &mount_ops_direct;
 			}
 		}
@@ -247,14 +247,14 @@ mount_farm_discover_system_mounts_transparent(struct mount_farm *farm)
 		new_mount = fstree_add_export(farm->tree, node->relative_path, node->export_type, node->dtype, NULL, FSTREE_QUIET);
 		if (new_mount == NULL) {
 			trace("overriding system mount for %s (%s) - replaced by platform", node->relative_path,
-					node->system? node->system->fstype : "unknown fstype");
+					node->mount_detail? node->mount_detail->fstype : "unknown fstype");
 			continue;
 		}
 
 		trace("created new system mount for %s (%s)", node->relative_path, fstree_node_fstype(node));
 		if (node->export_type != WORMHOLE_EXPORT_HIDE) {
 			fstree_node_set_fstype(new_mount, node->mount_ops, farm);
-			new_mount->system = system_mount_hold(node->system);
+			new_mount->mount_detail = fsutil_mount_detail_hold(node->mount_detail);
 		}
 	}
 

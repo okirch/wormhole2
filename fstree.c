@@ -334,9 +334,9 @@ fstree_node_reset(struct fstree_node *node)
 	node->dtype = DT_UNKNOWN;
 	wormhole_layer_array_destroy(&node->attached_layers);
 
-	if (node->system) {
-		system_mount_release(node->system);
-		node->system = NULL;
+	if (node->mount_detail) {
+		fsutil_mount_detail_release(node->mount_detail);
+		node->mount_detail = NULL;
 	}
 }
 
@@ -483,7 +483,7 @@ __fstree_node_mount_direct(const struct fstree_node *node)
 {
 	const char *mount_point;
 
-	if (!node->system) {
+	if (!node->mount_detail) {
 		log_error("direct mount: lacking fstype, device etc");
 		return false;
 	}
@@ -496,10 +496,10 @@ __fstree_node_mount_direct(const struct fstree_node *node)
 	trace("mounting %s below %s\n", node->mountpoint, node->root->path);
 
 	mount_point = __pathutil_concat2(node->root->path, node->mountpoint);
-	return fsutil_mount(node->system->fsname,
+	return fsutil_mount(node->mount_detail->fsname,
 			mount_point,
-			node->system->fstype,
-			node->system->options);
+			node->mount_detail->fstype,
+			node->mount_detail->options);
 }
 
 mount_ops_t	mount_ops_direct = {
