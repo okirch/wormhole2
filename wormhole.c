@@ -82,7 +82,7 @@ system_mount_release(struct system_mount *sm)
 }
 
 static bool
-system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *cursor)
+system_mount_tree_maybe_add_transparent(struct fstree *fstree, const fsutil_mount_cursor_t *cursor)
 {
 	struct fstree_node *node;
 	int dtype;
@@ -149,7 +149,7 @@ system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *
 }
 
 static struct fstree *
-system_mount_tree_discover(void)
+system_mount_tree_discover_transparent(void)
 {
 	fsutil_mount_iterator_t *it;
 	fsutil_mount_cursor_t cursor;
@@ -161,7 +161,7 @@ system_mount_tree_discover(void)
 	fstree = fstree_new(NULL);
 
 	while (fsutil_mount_iterator_next(it, &cursor))
-		system_mount_tree_maybe_add(fstree, &cursor);
+		system_mount_tree_maybe_add_transparent(fstree, &cursor);
 
 	fsutil_mount_iterator_free(it);
 
@@ -187,7 +187,7 @@ mount_farm_apply_layer(struct mount_farm *farm, struct wormhole_layer *layer)
 }
 
 static bool
-mount_farm_discover_system_mounts(struct mount_farm *farm)
+mount_farm_discover_system_mounts_transparent(struct mount_farm *farm)
 {
 	struct fstree *fstree = NULL;
 	struct fstree_iter *it;
@@ -196,7 +196,7 @@ mount_farm_discover_system_mounts(struct mount_farm *farm)
 
 	trace("Discovering system mounts");
 
-	if (!(fstree = system_mount_tree_discover())) {
+	if (!(fstree = system_mount_tree_discover_transparent())) {
 		log_error("Mount state discovery failed\n");
 		return false;
 	}
@@ -299,7 +299,7 @@ mount_farm_discover(struct mount_farm *farm, struct wormhole_layer_array *layers
 			goto out;
 	}
 
-	if (mount_farm_discover_system_mounts(farm)
+	if (mount_farm_discover_system_mounts_transparent(farm)
 	 && mount_farm_apply_quirks(farm)
 	 && mount_farm_percolate(farm)
 	 && mount_farm_fill_holes(farm)) {
