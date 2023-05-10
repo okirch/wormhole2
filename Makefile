@@ -110,6 +110,6 @@ depend:
 
 dist:
 	mkdir wormhole-$(VERSION)
-	cp $$(git ls-files) wormhole-$(VERSION)
+	git ls-files | cpio -dlp wormhole-$(VERSION)
 	tar cvjf wormhole-$(VERSION).tar.bz2 wormhole-$(VERSION)/
 	rm -rf wormhole-$(VERSION)
