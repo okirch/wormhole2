@@ -2,6 +2,7 @@
  - in boot mode, set SELinux context to unconfined
  - mount devpts
  - handle resolv.conf and other network related files
+ - handle x-initrd.mounts and x-systemd.* options in fstab?
 
  - represent bind mounts as a leaf with fstype "bind" and the source dir in lowerdir
  - 

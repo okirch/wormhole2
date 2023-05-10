@@ -1983,6 +1983,29 @@ fsutil_mount_detail_release(fsutil_mount_detail_t *md)
 	free(md);
 }
 
+void
+fsutil_mount_detail_array_append(fsutil_mount_detail_array_t *a, fsutil_mount_detail_t *md)
+{
+	if ((a->count & 15) == 0) {
+		a->data = realloc(a->data, (a->count + 16) * sizeof(a->data[0]));
+	}
+
+	a->data[a->count++] = fsutil_mount_detail_hold(md);
+}
+
+void
+fsutil_mount_detail_array_destroy(fsutil_mount_detail_array_t *a)
+{
+	unsigned int i;
+
+	for (i = 0; i < a->count; ++i)
+		fsutil_mount_detail_release(a->data[i]);
+
+	if (a->data)
+		free(a->data);
+	memset(a, 0, sizeof(*a));
+}
+
 bool
 fsutil_make_fs_private(const char *dir, bool maybe_in_chroot)
 {

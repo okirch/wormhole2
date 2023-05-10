@@ -32,6 +32,8 @@ struct strutil_array {
 	char **			data;
 };
 
+#include "sysmount.h"
+
 struct fsutil_tempdir {
 	char *		path;
 	bool		mounted;
@@ -138,68 +140,6 @@ extern bool			fsutil_ftw_exclude(struct fsutil_ftw_ctx *ctx, const char *path);
 extern const struct dirent *	fsutil_ftw_next(struct fsutil_ftw_ctx *ctx, struct fsutil_ftw_cursor *cursor);
 extern bool			fsutil_ftw_skip(struct fsutil_ftw_ctx *ctx, const struct fsutil_ftw_cursor *cursor);
 extern void			fsutil_ftw_ctx_free(struct fsutil_ftw_ctx *ctx);
-
-typedef struct fsutil_mount_detail fsutil_mount_detail_t;
-struct fsutil_mount_detail {
-	unsigned int	refcount;
-	char *		fstype;
-	char *		fsname;
-	char *		options;
-	struct strutil_array overlay_dirs;
-};
-
-extern fsutil_mount_detail_t *	fsutil_mount_detail_new(const char *fstype, const char *fsname, const char *options);
-extern fsutil_mount_detail_t *	fsutil_mount_detail_hold(fsutil_mount_detail_t *md);
-extern void			fsutil_mount_detail_release(fsutil_mount_detail_t *md);
-
-
-extern bool			fsutil_mount_overlay(const char *lowerdir,
-					const char *upperdir,
-					const char *workdir,
-					const char *target);
-extern bool			fsutil_mount_tmpfs(const char *where);
-extern bool			fsutil_mount_bind(const char *source,
-					const char *target, bool recursive);
-extern bool			fsutil_mount_virtual_fs(const char *where,
-					const char *fstype,
-					const char *options);
-extern bool			fsutil_mount_command(const char *target,
-					const char *root_path);
-extern bool			fsutil_mount(const char *device,
-					const char *target,
-					const char *fstype,
-					const char *options);
-extern bool			fsutil_lazy_umount(const char *path);
-extern bool			fsutil_make_fs_private(const char *dir, bool maybe_in_chroot);
-extern bool			fsutil_same_file(const char *path1, const char *path2);
-extern bool			fsutil_dir_is_mountpoint(const char *path);
-extern const char *		fsutil_makedir2(const char *parent, const char *name);
-extern const char *		fsutil_makefile2(const char *parent, const char *name);
-extern bool			fsutil_copy_file(const char *system_path, const char *image_path, const struct stat *st);
-extern char *			fsutil_resolve_fsuuid(const char *uuid);
-extern bool			fsutil_mount_options_contain(const char *options, const char *word);
-
-enum {
-	FSUTIL_MTAB_ITERATOR = 1,
-	FSUTIL_FSTAB_ITERATOR,
-};
-
-typedef struct fsutil_mount_iterator fsutil_mount_iterator_t;
-
-typedef struct fsutil_mount_cursor {
-	const char *		mountpoint;
-	fsutil_mount_detail_t *	detail;
-
-	union {
-		struct {
-			const struct strutil_array *dirs;
-		} overlay;
-	};
-} fsutil_mount_cursor_t;
-
-extern fsutil_mount_iterator_t *fsutil_mount_iterator_create(const char *root_path, int type, const char *mtab);
-extern bool			fsutil_mount_iterator_next(fsutil_mount_iterator_t *, fsutil_mount_cursor_t *);
-extern void			fsutil_mount_iterator_free(fsutil_mount_iterator_t *);
 
 static inline const char *
 __pathutil_concat2(const char *parent, const char *name)
