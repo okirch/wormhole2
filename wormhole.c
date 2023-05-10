@@ -411,10 +411,12 @@ wormhole_context_free(struct wormhole_context *ctx)
 	strutil_drop(&ctx->build.target);
 	strutil_drop(&ctx->build.root);
 	strutil_drop(&ctx->build.bindir);
-	strutil_drop(&ctx->boot.device);
-	strutil_drop(&ctx->boot.fstype);
-	strutil_drop(&ctx->boot.options);
 	strutil_array_destroy(&ctx->build.purge_directories);
+
+	if (ctx->boot.mount_detail) {
+		fsutil_mount_detail_release(ctx->boot.mount_detail);
+		ctx->boot.mount_detail = NULL;
+	}
 
 	if (ctx->farm) {
 		mount_farm_free(ctx->farm);
@@ -544,8 +546,7 @@ wormhole_context_set_boot(struct wormhole_context *ctx, const char *name)
 	if ((options = strchr(copy, ';')) != NULL)
 		*options++ = '\0';
 
-	strutil_set(&ctx->boot.device, copy);
-	strutil_set(&ctx->boot.options, options);
+	ctx->boot.mount_detail = fsutil_mount_detail_new(copy, NULL, options);
 	strutil_drop(&copy);
 }
 
@@ -789,6 +790,7 @@ __perform_boot(struct wormhole_context *ctx)
 		"btrfs", "ext4", "xfs", NULL,
 	};
 	const char *root_dir;
+	fsutil_mount_detail_t *md;
 	struct fstree *ostree;
 
 	ctx->exit_status = 100;
@@ -805,14 +807,17 @@ __perform_boot(struct wormhole_context *ctx)
 	if (!fsutil_makedirs("/tmp/root", 0755))
 		goto out;
 
-	if (fsutil_isdir(ctx->boot.device)) {
-		if (ctx->boot.fstype)
-			log_warning("Ignoring fstype \"%s\" while booting from directory %s", ctx->boot.fstype, ctx->boot.device);
-		root_dir = ctx->boot.device;
+	/* do_boot() has already checked that boot.mount_detail is set and contains
+	 * at least a valid fsname */
+	md = ctx->boot.mount_detail;
+	if (fsutil_isdir(md->fsname)) {
+		if (md->fstype)
+			log_warning("Ignoring fstype \"%s\" while booting from directory %s", md->fstype, md->fsname);
+		root_dir = md->fsname;
 	} else
-	if (ctx->boot.fstype) {
-		if (mount(ctx->boot.device, "/tmp/root", ctx->boot.fstype, 0, ctx->boot.options) < 0) {
-			log_error("Cannot mount %s file system on %s: %m", ctx->boot.fstype, ctx->boot.device);
+	if (md->fstype) {
+		if (mount(md->fsname, "/tmp/root", md->fstype, 0, md->options) < 0) {
+			log_error("Cannot mount %s file system on %s: %m", md->fstype, md->fsname);
 			goto out;
 		}
 		root_dir = "/tmp/root";
@@ -820,13 +825,13 @@ __perform_boot(struct wormhole_context *ctx)
 		const char **next, *fstype;
 
 		for (next = default_fstypes; (fstype = *next++) != NULL; ) {
-			if (mount(ctx->boot.device, "/tmp/root", fstype, 0, ctx->boot.options) >= 0) {
-				trace("Successfully mounted %s using %s", ctx->boot.device, fstype);
+			if (mount(md->fsname, "/tmp/root", fstype, 0, md->options) >= 0) {
+				trace("Successfully mounted %s using %s", md->fsname, fstype);
 				root_dir = "/tmp/root";
 				break;
 			}
 
-			trace("Failed to mount %s file system on %s: %m", fstype, ctx->boot.device);
+			trace("Failed to mount %s file system on %s: %m", fstype, md->fsname);
 		}
 	}
 
@@ -1157,6 +1162,8 @@ do_build(struct wormhole_context *ctx)
 static void
 do_boot(struct wormhole_context *ctx)
 {
+	const char *boot_device;
+
 	if (!ctx->use_privileged_namespace) {
 		log_error("Currently, you must be root to build wormhole layers\n");
 		return;
@@ -1167,7 +1174,13 @@ do_boot(struct wormhole_context *ctx)
 		return;
 	}
 
-	trace("Booting OS image at %s", ctx->boot.device);
+	if (ctx->boot.mount_detail == NULL
+	 || (boot_device = ctx->boot.mount_detail->fsname) == NULL) {
+		log_error("No boot device specified");
+		return;
+	}
+
+	trace("Booting OS image at %s", boot_device);
 	if (!wormhole_context_perform_in_container(ctx, __perform_boot, true))
 		return;
 
