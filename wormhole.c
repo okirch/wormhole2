@@ -783,6 +783,40 @@ ostree_attach_tmpfs(struct fstree *ostree, const char *system_path)
 	return fsutil_mount_tmpfs(image_path);
 }
 
+static bool
+identify_os(const char *root_dir)
+{
+	bool found = false;
+	FILE *fp;
+	char line[128];
+
+	fp = fopen(__pathutil_concat2(root_dir, "/etc/os-release"), "r");
+	if (fp == NULL)
+		return false;
+
+	while (fgets(line, sizeof(line), fp) != NULL) {
+		char *os_name, *s;
+
+		line[strcspn(line, "\r\n")] = '\0';
+
+		if (strncmp(line, "PRETTY_NAME=", 12))
+			continue;
+		os_name = line + 12;
+
+		if (*os_name == '"') {
+			++os_name;
+			if ((s = strchr(os_name, '"')) != NULL)
+				*s = '\0';
+		}
+
+		log_info("Found installation of %s", os_name);
+		found = true;
+	}
+
+	fclose(fp);
+	return found;
+}
+
 static int
 __perform_boot(struct wormhole_context *ctx)
 {
@@ -842,7 +876,8 @@ __perform_boot(struct wormhole_context *ctx)
 
 	ctx->farm = mount_farm_new(ctx->purpose, root_dir);
 
-	if (!system_mount_tree_discover_boot(ctx->farm->tree)) {
+	if (!identify_os(root_dir)
+	 || !system_mount_tree_discover_boot(ctx->farm->tree)) {
 		log_error("%s does not seem to contain a valid OS installation", root_dir);
 		goto out;
 	}
