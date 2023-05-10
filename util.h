@@ -139,6 +139,20 @@ extern const struct dirent *	fsutil_ftw_next(struct fsutil_ftw_ctx *ctx, struct 
 extern bool			fsutil_ftw_skip(struct fsutil_ftw_ctx *ctx, const struct fsutil_ftw_cursor *cursor);
 extern void			fsutil_ftw_ctx_free(struct fsutil_ftw_ctx *ctx);
 
+typedef struct fsutil_mount_detail fsutil_mount_detail_t;
+struct fsutil_mount_detail {
+	unsigned int	refcount;
+	char *		fstype;
+	char *		fsname;
+	char *		options;
+	struct strutil_array overlay_dirs;
+};
+
+extern fsutil_mount_detail_t *	fsutil_mount_detail_new(const char *fstype, const char *fsname, const char *options);
+extern fsutil_mount_detail_t *	fsutil_mount_detail_hold(fsutil_mount_detail_t *md);
+extern void			fsutil_mount_detail_release(fsutil_mount_detail_t *md);
+
+
 extern bool			fsutil_mount_overlay(const char *lowerdir,
 					const char *upperdir,
 					const char *workdir,

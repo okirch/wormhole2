@@ -1930,6 +1930,51 @@ fsutil_mount_options_contain(const char *options, const char *word)
 	return found;
 }
 
+/*
+ * mount details as found in fstab and mtab
+ */
+fsutil_mount_detail_t *
+fsutil_mount_detail_new(const char *fstype, const char *fsname, const char *options)
+{
+	fsutil_mount_detail_t *md;
+
+	md = calloc(1, sizeof(*md));
+
+	md->refcount = 1;
+	strutil_set(&md->fstype, fstype);
+	strutil_set(&md->fsname, fsname);
+	strutil_set(&md->options, options);
+
+	return md;
+}
+
+fsutil_mount_detail_t *
+fsutil_mount_detail_hold(fsutil_mount_detail_t *md)
+{
+	if (md != NULL) {
+		if (!md->refcount)
+			log_fatal("%s: refcount == 0", __func__);
+		md->refcount += 1;
+	}
+	return md;
+}
+
+void
+fsutil_mount_detail_release(fsutil_mount_detail_t *md)
+{
+	if (!md->refcount)
+		log_fatal("%s: refcount == 0", __func__);
+
+	if (--(md->refcount))
+		return;
+
+	strutil_drop(&md->fstype);
+	strutil_drop(&md->fsname);
+	strutil_drop(&md->options);
+	strutil_array_destroy(&md->overlay_dirs);
+	free(md);
+}
+
 bool
 fsutil_make_fs_private(const char *dir, bool maybe_in_chroot)
 {

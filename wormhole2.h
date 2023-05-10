@@ -50,15 +50,6 @@ typedef const struct mount_ops {
 	bool			(*mount)(const struct fstree_node *);
 } mount_ops_t;
 
-typedef struct fsutil_mount_detail fsutil_mount_detail_t;
-struct fsutil_mount_detail {
-	unsigned int	refcount;
-	char *		fstype;
-	char *		fsname;
-	char *		options;
-	struct strutil_array overlay_dirs;
-};
-
 #define FSTREE_NODE_F_READONLY	0x0001
 #define FSTREE_NODE_F_MAYREPLACE 0x0002
 
@@ -270,10 +261,6 @@ fstree_node_fstype(const struct fstree_node *node)
 {
 	return node->mount_ops? node->mount_ops->name : NULL;
 }
-
-extern fsutil_mount_detail_t *	fsutil_mount_detail_new(const char *fstype, const char *fsname, const char *options);
-extern fsutil_mount_detail_t *	fsutil_mount_detail_hold(fsutil_mount_detail_t *md);
-extern void			fsutil_mount_detail_release(fsutil_mount_detail_t *md);
 
 extern void			wormhole_layer_set_default_search_path(void);
 extern void			wormhole_layer_print_default_search_path(void);
