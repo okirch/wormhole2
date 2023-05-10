@@ -702,7 +702,7 @@ create_mount_farm_for_layer(struct wormhole_layer *layer, struct imgdelta_config
 	struct mount_farm *farm;
 	unsigned int i;
 
-	farm = mount_farm_new(layer->image_path);
+	farm = mount_farm_new(PURPOSE_BUILD, layer->image_path);
 
 	for (i = 0; i < cfg->mounts.count; ++i) {
 		struct mount_config *mnt = cfg->mounts.data[i];

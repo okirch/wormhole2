@@ -325,6 +325,21 @@ fstree_node_set_fstype(struct fstree_node *node, mount_ops_t *mount_ops, struct 
 	return node->upper && node->work && node->mountpoint;
 }
 
+void
+fstree_node_reset(struct fstree_node *node)
+{
+	node->mount_ops = NULL;
+	node->export_type = WORMHOLE_EXPORT_NONE;
+	node->export_flags = 0;
+	node->dtype = DT_UNKNOWN;
+	wormhole_layer_array_destroy(&node->attached_layers);
+
+	if (node->system) {
+		system_mount_release(node->system);
+		node->system = NULL;
+	}
+}
+
 /*
  * Change a node from a mount to in internal, non-mount node
  */
@@ -626,6 +641,8 @@ mount_export_type_as_string(int export_type)
 		return "semitransparent";
 	case WORMHOLE_EXPORT_HIDE:
 		return "hidden";
+	case WORMHOLE_EXPORT_MOUNTIT:
+		return "real";
 	case WORMHOLE_EXPORT_ERROR:
 		return "error";
 	}

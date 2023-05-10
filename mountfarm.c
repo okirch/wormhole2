@@ -191,20 +191,26 @@ mount_config_array_append(struct mount_config_array *a, struct mount_config *mnt
  * The actual mount farms
  */
 struct mount_farm *
-mount_farm_new(const char *farm_root)
+mount_farm_new(int purpose, const char *farm_root)
 {
 	struct mount_farm *farm;
 
 	farm = calloc(1, sizeof(*farm));
 
-	(void) fsutil_makedirs(farm_root, 0755);
+	if (purpose != PURPOSE_BOOT) {
+		(void) fsutil_makedirs(farm_root, 0755);
 
-	pathutil_concat2(&farm->upper_base, farm_root, "upper");
-	pathutil_concat2(&farm->work_base, farm_root, "work");
-	pathutil_concat2(&farm->chroot, farm_root, "root");
+		pathutil_concat2(&farm->upper_base, farm_root, "upper");
+		pathutil_concat2(&farm->work_base, farm_root, "work");
+		pathutil_concat2(&farm->chroot, farm_root, "root");
 
-	farm->tree = fstree_new(farm->chroot);
-	farm->tree->root->export_type = WORMHOLE_EXPORT_ROOT;
+		farm->tree = fstree_new(farm->chroot);
+		farm->tree->root->export_type = WORMHOLE_EXPORT_ROOT;
+	} else {
+		strutil_set(&farm->chroot, farm_root);
+		farm->tree = fstree_new(farm->chroot);
+		farm->tree->root->export_type = WORMHOLE_EXPORT_NONE;
+	}
 
 	return farm;
 }
@@ -476,6 +482,13 @@ fstree_add_export(struct fstree *fstree, const char *system_path, unsigned int e
 	if (!(node = fstree_node_lookup(fstree->root, system_path, true)))
 		return NULL;
 
+	if (node->export_flags & FSTREE_NODE_F_MAYREPLACE) {
+		/* We usually get here in the boot case, when fstab specifies /dev and we
+		 * want to bind mount the host /dev instead. Resetting the node allows
+		 * the rest of this function to proceed. */
+		fstree_node_reset(node);
+	}
+
 	if (node->export_type == WORMHOLE_EXPORT_NONE) {
 		trace2("  mount farm: add new %s mount %s", mount_export_type_as_string(export_type),  system_path);
 		node->export_type = export_type;
@@ -606,6 +619,8 @@ __mount_farm_mount_one(const struct fstree_node *node)
 	if (node->mount_ops == NULL)
 		return true;
 
+	trace2("About to mount %s using %s mount driver", node->mountpoint, node->mount_ops->name);
+	trace2(" -> %s", node->relative_path);
 	if (!fstree_node_mount(node))
 		return false;
 

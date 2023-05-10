@@ -41,6 +41,7 @@ enum {
 	WORMHOLE_EXPORT_STACKED,
 	WORMHOLE_EXPORT_TRANSPARENT,
 	WORMHOLE_EXPORT_SEMITRANSPARENT,
+	WORMHOLE_EXPORT_MOUNTIT,
 	WORMHOLE_EXPORT_HIDE,
 };
 
@@ -58,6 +59,7 @@ struct system_mount {
 };
 
 #define FSTREE_NODE_F_READONLY	0x0001
+#define FSTREE_NODE_F_MAYREPLACE 0x0002
 
 struct fstree_node {
 	struct fstree_node *parent;
@@ -79,7 +81,6 @@ struct fstree_node {
 	char *		mountpoint;
 
 	mount_ops_t *	mount_ops;
-	char *		fsname;
 	struct system_mount *system;
 
 	struct wormhole_layer *bind_mount_override_layer;
@@ -183,12 +184,14 @@ struct wormhole_context {
 
 	struct mount_farm *	farm;
 
+	/* FIXME: replace this with flags? */
 	bool			manage_rpmdb;
 	bool			map_caller_to_root;
 	bool			use_privileged_namespace;
 	bool			running_inside_chroot;
 	bool			auto_entry_points;
 	bool			force;
+	bool			no_selinux;
 
 	struct fsutil_tempdir	temp;
 };
@@ -226,7 +229,7 @@ extern struct mount_config *	mount_config_array_add(struct mount_config_array *,
 extern struct mount_config *	mount_config_array_append(struct mount_config_array *, struct mount_config *);
 extern struct mount_config *	mount_config_array_get(struct mount_config_array *, const char *path);
 
-extern struct mount_farm *	mount_farm_new(const char *farm_root);
+extern struct mount_farm *	mount_farm_new(int purpose, const char *farm_root);
 extern void			mount_farm_free(struct mount_farm *farm);
 extern bool			mount_farm_create_workspace(struct mount_farm *farm);
 extern bool			mount_farm_set_upper_base(struct mount_farm *farm, const char *upper_base);
@@ -252,6 +255,7 @@ extern bool			fstree_node_is_below_mountpoint(const struct fstree_node *leaf);
 extern struct fstree_node *	fstree_node_lookup(struct fstree_node *parent, const char *relative_path, bool create);
 extern char *			fstree_node_relative_path(struct fstree_node *ancestor, struct fstree_node *node);
 extern bool			fstree_node_set_fstype(struct fstree_node *leaf, mount_ops_t *ops, struct mount_farm *farm);
+extern void			fstree_node_reset(struct fstree_node *leaf);
 extern bool			fstree_node_add_lower(struct fstree_node *leaf, const char *path);
 extern char *			fstree_node_build_lowerspec(const struct fstree_node *leaf);
 extern void			fstree_node_invalidate(struct fstree_node *leaf);

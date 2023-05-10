@@ -139,6 +139,82 @@ system_mount_tree_discover_transparent(void)
 }
 
 static bool
+system_mount_tree_discover_boot(struct fstree *fstree)
+{
+	const char *root_dir = fstree->root_location->path;
+	fsutil_mount_iterator_t *it;
+	fsutil_mount_cursor_t cursor;
+
+	if (root_dir == NULL) {
+		log_error("%s: refusing to operate on /", __func__);
+		return false;
+	}
+
+	if (!(it = fsutil_mount_iterator_create(root_dir, FSUTIL_FSTAB_ITERATOR, NULL)))
+		return false;
+
+	while (fsutil_mount_iterator_next(it, &cursor)) {
+		fstree_node_t *node;
+
+		if (fsutil_mount_options_contain(cursor.options, "noauto"))
+			continue;
+
+		if (!strcmp(cursor.fstype, "swap"))
+			continue;
+
+		if (!strcmp(cursor.fstype, "nfs")) {
+			log_warning("Ignoring NFS file system at %s for now", cursor.mountpoint);
+			continue;
+		}
+
+		node = fstree_add_export(fstree, cursor.mountpoint, WORMHOLE_EXPORT_MOUNTIT, DT_UNKNOWN, NULL, 0);
+		if (node == NULL)
+			return false;
+
+		strutil_set(&node->mountpoint, node->relative_path);
+		node->system = system_mount_new(cursor.fstype, cursor.fsname, cursor.options);
+
+		if (!strncmp(cursor.fsname, "UUID=", 5)) {
+			char *real_device;
+
+			real_device = fsutil_resolve_fsuuid(cursor.fsname + 5);
+			if (real_device) {
+				strutil_drop(&node->system->fsname);
+				node->system->fsname = real_device;
+				node->mount_ops = &mount_ops_direct;
+			}
+		}
+		if (node->mount_ops == NULL)
+			node->mount_ops = &mount_ops_mountcmd;
+		node->export_flags |= FSTREE_NODE_F_MAYREPLACE;
+	}
+
+	fsutil_mount_iterator_free(it);
+
+#if 1
+	/* When we get here, we have already mounted the root FS */
+	if (fstree->root)
+		fstree_node_reset(fstree->root);
+	trace("root=%p ops=%s", fstree->root, fstree->root->mount_ops);
+#else
+	if (fstree->root == NULL || fstree->root->mount_ops == NULL) {
+		log_error("%s: could not find a file system for / in %s/etc/fstab",
+				__func__, root_dir);
+		return false;
+	}
+	fstree->root->mount_ops = &mount_ops_direct;
+#endif
+
+	fstree_hide_pattern(fstree, "/tmp/*");
+	fstree_hide_pattern(fstree, "/dev");
+	fstree_hide_pattern(fstree, "/sys");
+	fstree_hide_pattern(fstree, "/proc");
+	fstree_hide_pattern(fstree, "/run");
+
+	return true;
+}
+
+static bool
 mount_farm_apply_layer(struct mount_farm *farm, struct wormhole_layer *layer)
 {
 	return wormhole_layer_build_mount_farm(layer, farm);
@@ -379,7 +455,7 @@ wormhole_context_new(void)
 	if (getuid() == 0)
 		ctx->use_privileged_namespace = true;
 
-	if (!(ctx->farm = mount_farm_new(workspace)))
+	if (!(ctx->farm = mount_farm_new(ctx->purpose, workspace)))
 		goto failed;
 
 	return ctx;
@@ -619,6 +695,10 @@ wormhole_context_switch_root(struct wormhole_context *ctx)
 			log_fatal("Failed to setuid(0): %m\n");
 	}
 
+	if (ctx->no_selinux) {
+		log_warning("Cannot disable SELinux mode - not yet implemented");
+	}
+
 	return true;
 }
 
@@ -723,7 +803,6 @@ __perform_boot(struct wormhole_context *ctx)
 	if (!fsutil_makedirs("/tmp/root", 0755))
 		goto out;
 
-	ctx->farm = mount_farm_new("/tmp/unused");
 	if (fsutil_isdir(ctx->boot.device)) {
 		if (ctx->boot.fstype)
 			log_warning("Ignoring fstype \"%s\" while booting from directory %s", ctx->boot.fstype, ctx->boot.device);
@@ -754,15 +833,28 @@ __perform_boot(struct wormhole_context *ctx)
 		goto out;
 	}
 
-	ostree = fstree_new(root_dir);
-	if (!ostree_attach(ostree, "/dev")
-	 || !ostree_attach(ostree, "/sys")
-	 || !ostree_attach_tmpfs(ostree, "/tmp")
+	ctx->farm = mount_farm_new(ctx->purpose, root_dir);
+
+	if (!system_mount_tree_discover_boot(ctx->farm->tree)) {
+		log_error("%s does not seem to contain a valid OS installation", root_dir);
+		goto out;
+	}
+
+	ostree = ctx->farm->tree;
+
+	/* We first need to mount various file systems to allow mount(8) to work properly. */
+	if (!ostree_attach(ostree, "/sys")
+	 || !ostree_attach(ostree, "/dev"))
+		goto out;
+
+	if (!wormhole_context_mount_tree(ctx))
+		goto out;
+
+	if (!ostree_attach_tmpfs(ostree, "/tmp")
 	 || !ostree_attach_tmpfs(ostree, "/run")
 	 || !ostree_attach_readonly(ostree, "/run/udev"))
 		goto out;
 
-	strutil_set(&ctx->farm->chroot, root_dir);
 	if (!wormhole_context_switch_root(ctx))
 		goto out;
 
@@ -1176,6 +1268,8 @@ main(int argc, char **argv)
 
 		case OPT_BOOT:
 			wormhole_context_set_boot(ctx, optarg);
+			/* For now, turn off SELinux unconditionally */
+			ctx->no_selinux = true;
 			break;
 
 		case 'd':

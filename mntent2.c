@@ -174,6 +174,9 @@ __process_overlay_options(fsutil_mount_iterator_t *it, const char *options)
 static void
 fsutil_mount_cursor_set(struct fsutil_mount_iterator *it, fsutil_mount_cursor_t *cursor, const char *mount_point, const char *fstype, const char *fsname, const char *options)
 {
+	if (options && !strcmp(options, "defaults"))
+		options = NULL;
+
 	cursor->mountpoint = mount_point;
 	cursor->fstype = fstype;
 	cursor->fsname = fsname;
