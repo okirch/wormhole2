@@ -460,6 +460,62 @@ mount_ops_t	mount_ops_tmpfs = {
 	.mount		= __fstree_node_mount_virtual,
 };
 
+/*
+ * Implementation for mounts of btrfs volumes etc
+ */
+static bool
+__fstree_node_mount_direct(const struct fstree_node *node)
+{
+	const char *mount_point;
+
+	if (!node->system) {
+		log_error("direct mount: lacking fstype, device etc");
+		return false;
+	}
+
+	if (!node->root) {
+		log_error("direct mount: will operate only on nodes that have a fsroot set");
+		return false;
+	}
+
+	trace("mounting %s below %s\n", node->mountpoint, node->root->path);
+
+	mount_point = __pathutil_concat2(node->root->path, node->mountpoint);
+	return fsutil_mount(node->system->fsname,
+			mount_point,
+			node->system->fstype,
+			node->system->options);
+}
+
+mount_ops_t	mount_ops_direct = {
+	.name		= "direct",
+	.mount		= __fstree_node_mount_direct,
+};
+
+/*
+ * Implementation for mounts using "chroot mount ..."
+ */
+static bool
+__fstree_node_mount_command(const struct fstree_node *node)
+{
+	const char *root_path;
+
+	if (!node->root) {
+		log_error("mountcmd: will operate only on nodes that have a fsroot set");
+		return false;
+	}
+
+	root_path = node->root->path;
+
+	trace("mounting %s below %s\n", node->mountpoint, root_path);
+	return fsutil_mount_command(node->mountpoint, root_path);
+}
+
+mount_ops_t	mount_ops_mountcmd = {
+	.name		= "mountcmd",
+	.mount		= __fstree_node_mount_command,
+};
+
 bool
 fstree_node_mount(const struct fstree_node *node)
 {

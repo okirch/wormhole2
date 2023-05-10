@@ -1859,6 +1859,41 @@ fsutil_mount_tmpfs(const char *where)
 }
 
 bool
+fsutil_mount(const char *device, const char *where, const char *fstype, const char *options)
+{
+	int flags = 0;
+
+	if (mount(device, where, fstype, flags, options) < 0) {
+		log_error("Unable to mount %s file system on %s: %m", fstype, where);
+		return false;
+	}
+
+	trace2("Successfully mounted %s file system %s on %s (options %s)", fstype, device, where, options);
+	return true;
+}
+
+bool
+fsutil_mount_command(const char *target, const char *root_path)
+{
+	const char *argv[3] = { "mount", target, NULL };
+	struct procutil_command cmd;
+	int status;
+
+	procutil_command_init(&cmd, (char **) argv);
+	cmd.root_directory = root_path;
+
+	if (!procutil_command_run(&cmd, &status))
+		return false;
+
+	if (!procutil_child_status_okay(status)) {
+		log_error("mount %s: %s", target, procutil_child_status_describe(status));
+		return false;
+	}
+
+	return true;
+}
+
+bool
 fsutil_lazy_umount(const char *path)
 {
 	trace("Unmounting %s\n", path);

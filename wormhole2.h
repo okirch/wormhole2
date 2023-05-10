@@ -199,6 +199,8 @@ struct wormhole_context {
 extern mount_ops_t		mount_ops_overlay;
 extern mount_ops_t		mount_ops_bind;
 extern mount_ops_t		mount_ops_tmpfs;
+extern mount_ops_t		mount_ops_mountcmd;
+extern mount_ops_t		mount_ops_direct;
 
 struct fstree *			fstree_new(const char *root_path);
 extern void			fstree_free(struct fstree *fstree);

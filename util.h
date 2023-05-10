@@ -149,6 +149,12 @@ extern bool			fsutil_mount_bind(const char *source,
 extern bool			fsutil_mount_virtual_fs(const char *where,
 					const char *fstype,
 					const char *options);
+extern bool			fsutil_mount_command(const char *target,
+					const char *root_path);
+extern bool			fsutil_mount(const char *device,
+					const char *target,
+					const char *fstype,
+					const char *options);
 extern bool			fsutil_lazy_umount(const char *path);
 extern bool			fsutil_make_fs_private(const char *dir, bool maybe_in_chroot);
 extern bool			fsutil_same_file(const char *path1, const char *path2);
