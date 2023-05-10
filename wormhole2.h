@@ -266,6 +266,10 @@ fstree_node_fstype(const struct fstree_node *node)
 	return node->mount_ops? node->mount_ops->name : NULL;
 }
 
+extern struct system_mount *	system_mount_new(const char *fstype, const char *fsname, const char *options);
+extern struct system_mount *	system_mount_hold(struct system_mount *md);
+extern void			system_mount_release(struct system_mount *md);
+
 extern void			wormhole_layer_set_default_search_path(void);
 extern void			wormhole_layer_print_default_search_path(void);
 extern struct wormhole_layer *	wormhole_layer_new(const char *name, const char *path, unsigned int depth);

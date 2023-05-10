@@ -244,3 +244,49 @@ fsutil_dir_is_mountpoint(const char *path)
 
 	return is_mount;
 }
+
+/*
+ * mount details as found in fstab and mtab
+ * FIXME: these don't really belong here.
+ */
+struct system_mount *
+system_mount_new(const char *fstype, const char *fsname, const char *options)
+{
+	struct system_mount *sm;
+
+	sm = calloc(1, sizeof(*sm));
+
+	sm->refcount = 1;
+	strutil_set(&sm->fstype, fstype);
+	strutil_set(&sm->fsname, fsname);
+	strutil_set(&sm->options, options);
+
+	return sm;
+}
+
+struct system_mount *
+system_mount_hold(struct system_mount *sm)
+{
+	if (sm != NULL) {
+		if (!sm->refcount)
+			log_fatal("%s: refcount == 0", __func__);
+		sm->refcount += 1;
+	}
+	return sm;
+}
+
+void
+system_mount_release(struct system_mount *sm)
+{
+	if (!sm->refcount)
+		log_fatal("%s: refcount == 0", __func__);
+
+	if (--(sm->refcount))
+		return;
+
+	strutil_drop(&sm->fstype);
+	strutil_drop(&sm->fsname);
+	strutil_drop(&sm->options);
+	strutil_array_destroy(&sm->overlay_dirs);
+	free(sm);
+}
