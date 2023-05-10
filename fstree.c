@@ -410,7 +410,7 @@ __fstree_node_mount_overlay(const struct fstree_node *node)
 	if (!(lowerspec = fstree_node_build_lowerspec(node)))
 		return false;
 
-	if (!node->readonly)
+	if (!(node->export_flags & FSTREE_NODE_F_READONLY))
 		snprintf(options, sizeof(options),
 			"userxattr,lowerdir=%s,upperdir=%s,workdir=%s",
 			lowerspec, node->upper, node->work);

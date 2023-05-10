@@ -57,15 +57,16 @@ struct system_mount {
 	struct strutil_array overlay_dirs;
 };
 
+#define FSTREE_NODE_F_READONLY	0x0001
+
 struct fstree_node {
 	struct fstree_node *parent;
 	struct fstree_node *next;
 	struct fstree_node *children;
 
 	const struct fsroot *root;
-	bool		readonly;
-	bool		nonempty;
 
+	int		export_flags;
 	int		export_type;
 	int		dtype;
 
