@@ -39,6 +39,48 @@
 
 #define BIND_SYSTEM_OVERLAYS	true
 
+struct system_mount *
+system_mount_new(const char *fstype, const char *fsname, const char *options)
+{
+	struct system_mount *sm;
+
+	sm = calloc(1, sizeof(*sm));
+
+	sm->refcount = 1;
+	strutil_set(&sm->fstype, fstype);
+	strutil_set(&sm->fsname, fsname);
+	strutil_set(&sm->options, options);
+
+	return sm;
+}
+
+struct system_mount *
+system_mount_hold(struct system_mount *sm)
+{
+	if (sm != NULL) {
+		if (!sm->refcount)
+			log_fatal("%s: refcount == 0", __func__);
+		sm->refcount += 1;
+	}
+	return sm;
+}
+
+void
+system_mount_release(struct system_mount *sm)
+{
+	if (!sm->refcount)
+		log_fatal("%s: refcount == 0", __func__);
+
+	if (--(sm->refcount))
+		return;
+
+	strutil_drop(&sm->fstype);
+	strutil_drop(&sm->fsname);
+	strutil_drop(&sm->options);
+	strutil_array_destroy(&sm->overlay_dirs);
+	free(sm);
+}
+
 static bool
 system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *cursor)
 {
@@ -93,16 +135,14 @@ system_mount_tree_maybe_add(struct fstree *fstree, const fsutil_mount_cursor_t *
 		return false;
 	}
 
-	if (node->system.fstype) {
+	if (node->system) {
 		/* It's a setup problem for the system, but not a problem for us as we just bind mount
 		 * what's there. */
-		log_warning("%s: duplicate system mount (%s and %s)", cursor->mountpoint, node->system.fstype, cursor->fstype);
+		log_warning("%s: duplicate system mount (%s and %s)", cursor->mountpoint, node->system->fstype, cursor->fstype);
 		return false;
 	}
 
-	strutil_set(&node->system.fstype, cursor->fstype);
-	strutil_set(&node->system.fsname, cursor->fsname);
-
+	node->system = system_mount_new(cursor->fstype, cursor->fsname, cursor->options);
 	node->mount_ops = &mount_ops_bind;
 
 	return true;
@@ -172,13 +212,16 @@ mount_farm_discover_system_mounts(struct mount_farm *farm)
 
 		new_mount = fstree_add_export(farm->tree, node->relative_path, node->export_type, node->dtype, NULL, FSTREE_QUIET);
 		if (new_mount == NULL) {
-			trace("overriding system mount for %s (%s) - replaced by platform", node->relative_path, node->system.fstype);
+			trace("overriding system mount for %s (%s) - replaced by platform", node->relative_path,
+					node->system? node->system->fstype : "unknown fstype");
 			continue;
 		}
 
 		trace("created new system mount for %s (%s)", node->relative_path, fstree_node_fstype(node));
-		if (node->export_type != WORMHOLE_EXPORT_HIDE)
+		if (node->export_type != WORMHOLE_EXPORT_HIDE) {
 			fstree_node_set_fstype(new_mount, node->mount_ops, farm);
+			new_mount->system = system_mount_hold(node->system);
+		}
 	}
 
 	okay = true;
@@ -723,6 +766,11 @@ __perform_boot(struct wormhole_context *ctx)
 		goto out;
 
 	ctx->farm = mount_farm_new("/tmp/unused");
+	if (fsutil_isdir(ctx->boot.device)) {
+		if (ctx->boot.fstype)
+			log_warning("Ignoring fstype \"%s\" while booting from directory %s", ctx->boot.fstype, ctx->boot.device);
+		root_dir = ctx->boot.device;
+	} else
 	if (ctx->boot.fstype) {
 		if (mount(ctx->boot.device, "/tmp/root", ctx->boot.fstype, 0, ctx->boot.options) < 0) {
 			log_error("Cannot mount %s file system on %s: %m", ctx->boot.fstype, ctx->boot.device);

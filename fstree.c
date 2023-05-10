@@ -312,6 +312,7 @@ fstree_node_set_fstype(struct fstree_node *node, mount_ops_t *mount_ops, struct 
 		return false;
 	}
 
+	/* FIXME - we only need to set upper and work for transparent mounts */
 	if (!node->upper)
 		strutil_set(&node->upper, fsutil_makedir2(farm->upper_base, node->relative_path));
 

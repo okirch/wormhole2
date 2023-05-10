@@ -49,6 +49,14 @@ typedef const struct mount_ops {
 	bool			(*mount)(const struct fstree_node *);
 } mount_ops_t;
 
+struct system_mount {
+	unsigned int	refcount;
+	char *		fstype;
+	char *		fsname;
+	char *		options;
+	struct strutil_array overlay_dirs;
+};
+
 struct fstree_node {
 	struct fstree_node *parent;
 	struct fstree_node *next;
@@ -71,11 +79,7 @@ struct fstree_node {
 
 	mount_ops_t *	mount_ops;
 	char *		fsname;
-	struct {
-		char *	fstype;
-		char *	fsname;
-		struct strutil_array overlay_dirs;
-	} system;
+	struct system_mount *system;
 
 	struct wormhole_layer *bind_mount_override_layer;
 	struct wormhole_layer_array attached_layers;
