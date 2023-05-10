@@ -29,59 +29,114 @@
 #include "tracing.h"
 #include "util.h"
 
+static bool		fsutil_mount_iterator_getmntent(fsutil_mount_iterator_t *it, fsutil_mount_cursor_t *cursor);
 
 struct fsutil_mount_iterator {
 	FILE *		mf;
-	char *		root_dir;
-
+	int		type;
+	char *		strip_prefix;
 	struct strutil_array overlay_dirs;
 };
 
-fsutil_mount_iterator_t *
-fsutil_mount_iterator_create(const char *root_dir, const char *mtab)
+static fsutil_mount_iterator_t *
+fsutil_mount_iterator_new(const char *root_dir, int type)
 {
-	fsutil_mount_iterator_t *it;
 	char root_path_buf[PATH_MAX];
-	FILE *mf;
+	fsutil_mount_iterator_t *it;
 
-	if (mtab == NULL)
-		mtab = "/proc/mounts";
+	it = calloc(1, sizeof(*it));
+	it->type = type;
 
-	if (root_dir) {
+	/* When searching /proc/mounts for entries below a certain root directory,
+	 * we need to resolve the root dir to its realpath, as this is what
+	 * /proc/mounts will show. */
+	if (root_dir && type == FSUTIL_MTAB_ITERATOR) {
 		const char *resolved_root;
 
 		resolved_root = realpath(root_dir, root_path_buf);
 		if (resolved_root == NULL) {
 			log_error("realname(%s) failed: %m", root_dir);
+			fsutil_mount_iterator_free(it);
 			return NULL;
 		}
 
-		root_dir = resolved_root;
+		strutil_set(&it->strip_prefix, resolved_root);
 	}
 
-	if ((mf = setmntent(mtab, "r")) == NULL) {
-		log_error("Unable to open %s: %m", mtab);
+	return it;
+}
+
+fsutil_mount_iterator_t *
+fsutil_mount_iterator_create(const char *root_dir, int type, const char *xtab_path)
+{
+	fsutil_mount_iterator_t *it;
+
+	it = fsutil_mount_iterator_new(root_dir, type);
+
+	switch (type) {
+	case FSUTIL_MTAB_ITERATOR:
+		if (xtab_path == NULL)
+			xtab_path = "/proc/mounts";
+
+		it->mf = setmntent(xtab_path, "r");
+		break;
+
+	case FSUTIL_FSTAB_ITERATOR:
+		if (xtab_path == NULL)
+			xtab_path = "/etc/fstab";
+
+		if (root_dir)
+			xtab_path = __pathutil_concat2(root_dir, xtab_path);
+
+		it->mf = fopen(xtab_path, "r");
+		break;
+
+	default:
+		log_error("%s: unknown type %u", __func__, type);
+		return false;
+	}
+
+	if (it->mf == NULL) {
+		log_error("Unable to open %s: %m", xtab_path);
+		fsutil_mount_iterator_free(it);
 		return NULL;
 	}
 
-	it = calloc(1, sizeof(*it));
-	strutil_set(&it->root_dir, root_dir);
-	it->mf = mf;
-
 	return it;
+}
+
+static void
+fsutil_mount_iterator_close(fsutil_mount_iterator_t *it)
+{
+	if (it->mf) {
+		endmntent(it->mf);
+		it->mf = NULL;
+	}
+}
+
+bool
+fsutil_mount_iterator_next(fsutil_mount_iterator_t *it, fsutil_mount_cursor_t *cursor)
+{
+	memset(cursor, 0, sizeof(*cursor));
+
+	if (!it->mf)
+		return false;
+
+	strutil_array_destroy(&it->overlay_dirs);
+	if (!fsutil_mount_iterator_getmntent(it, cursor)) {
+		fsutil_mount_iterator_close(it);
+		return false;
+	}
+
+	return true;
 }
 
 void
 fsutil_mount_iterator_free(fsutil_mount_iterator_t *it)
 {
+	fsutil_mount_iterator_close(it);
 	strutil_array_destroy(&it->overlay_dirs);
-	strutil_drop(&it->root_dir);
-
-	if (it->mf) {
-		endmntent(it->mf);
-		it->mf = NULL;
-	}
-
+	strutil_drop(&it->strip_prefix);
 	free(it);
 }
 
@@ -116,40 +171,47 @@ __process_overlay_options(fsutil_mount_iterator_t *it, const char *options)
 	return &it->overlay_dirs;
 }
 
-bool
-fsutil_mount_iterator_next(fsutil_mount_iterator_t *it, fsutil_mount_cursor_t *cursor)
+static void
+fsutil_mount_cursor_set(struct fsutil_mount_iterator *it, fsutil_mount_cursor_t *cursor, const char *mount_point, const char *fstype, const char *fsname, const char *options)
+{
+	cursor->mountpoint = mount_point;
+	cursor->fstype = fstype;
+	cursor->fsname = fsname;
+	cursor->options = options;
+
+	if (!strcmp(cursor->fstype, "overlay"))
+		cursor->overlay.dirs = __process_overlay_options(it, cursor->options);
+}
+
+static inline const char *
+maybe_strip_root_dir(const char *mount_point, const char *strip_prefix)
+{
+	const char *relative_path;
+
+	if (strip_prefix == NULL)
+		return mount_point;
+
+	relative_path = fsutil_strip_path_prefix(mount_point, strip_prefix);
+	if (relative_path == NULL) {
+		trace("%s is not below %s", mount_point, strip_prefix);
+		return NULL;
+	}
+
+	return relative_path;
+}
+
+static bool
+fsutil_mount_iterator_getmntent(fsutil_mount_iterator_t *it, fsutil_mount_cursor_t *cursor)
 {
 	struct mntent *m;
-
-	memset(cursor, 0, sizeof(*cursor));
-
-	if (!it->mf)
-		return false;
-
-	strutil_array_destroy(&it->overlay_dirs);
 
 	while ((m = getmntent(it->mf)) != NULL) {
 		const char *mount_point = m->mnt_dir;
 
-		if (it->root_dir) {
-			const char *relative_path;
+		if (!(mount_point = maybe_strip_root_dir(mount_point, it->strip_prefix)))
+			continue;
 
-			relative_path = fsutil_strip_path_prefix(mount_point, it->root_dir);
-			if (relative_path == NULL) {
-				trace("%s is not below %s", m->mnt_dir, it->root_dir);
-				continue;
-			}
-			mount_point = relative_path;
-		}
-
-		cursor->mountpoint = mount_point;
-		cursor->fstype = m->mnt_type;
-		cursor->fsname = m->mnt_fsname;
-		cursor->options = m->mnt_opts;
-
-		if (!strcmp(cursor->fstype, "overlay"))
-			cursor->overlay.dirs = __process_overlay_options(it, cursor->options);
-
+		fsutil_mount_cursor_set(it, cursor, mount_point, m->mnt_type, m->mnt_fsname, m->mnt_opts);
 		return true;
 	}
 

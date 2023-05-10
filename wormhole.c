@@ -155,7 +155,7 @@ system_mount_tree_discover_transparent(void)
 	fsutil_mount_cursor_t cursor;
 	struct fstree *fstree;
 
-	if (!(it = fsutil_mount_iterator_create(NULL, NULL)))
+	if (!(it = fsutil_mount_iterator_create(NULL, FSUTIL_MTAB_ITERATOR, NULL)))
 		return NULL;
 
 	fstree = fstree_new(NULL);

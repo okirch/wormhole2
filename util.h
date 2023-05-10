@@ -157,6 +157,11 @@ extern const char *		fsutil_makedir2(const char *parent, const char *name);
 extern const char *		fsutil_makefile2(const char *parent, const char *name);
 extern bool			fsutil_copy_file(const char *system_path, const char *image_path, const struct stat *st);
 
+enum {
+	FSUTIL_MTAB_ITERATOR = 1,
+	FSUTIL_FSTAB_ITERATOR,
+};
+
 typedef struct fsutil_mount_iterator fsutil_mount_iterator_t;
 
 typedef struct fsutil_mount_cursor {
@@ -172,7 +177,7 @@ typedef struct fsutil_mount_cursor {
 	};
 } fsutil_mount_cursor_t;
 
-extern fsutil_mount_iterator_t *fsutil_mount_iterator_create(const char *root_path, const char *mtab);
+extern fsutil_mount_iterator_t *fsutil_mount_iterator_create(const char *root_path, int type, const char *mtab);
 extern bool			fsutil_mount_iterator_next(fsutil_mount_iterator_t *, fsutil_mount_cursor_t *);
 extern void			fsutil_mount_iterator_free(fsutil_mount_iterator_t *);
 
