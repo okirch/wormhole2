@@ -188,9 +188,7 @@ typedef struct fsutil_mount_iterator fsutil_mount_iterator_t;
 
 typedef struct fsutil_mount_cursor {
 	const char *		mountpoint;
-	const char *		fstype;
-	const char *		fsname;
-	const char *		options;
+	fsutil_mount_detail_t *	detail;
 
 	union {
 		struct {

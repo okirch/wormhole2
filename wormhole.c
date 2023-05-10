@@ -42,24 +42,25 @@
 static bool
 system_mount_tree_maybe_add_transparent(struct fstree *fstree, const fsutil_mount_cursor_t *cursor)
 {
+	fsutil_mount_detail_t *md = cursor->detail;
 	struct fstree_node *node;
 	int dtype;
 
 	if (!strcmp(cursor->mountpoint, "/"))
 		return true;
 
-	if (cursor->fstype == NULL) {
+	if (md->fstype == NULL) {
 		trace("system mount %s has null fstype", cursor->mountpoint);
 		return false;
 	}
 
 	/* For the time being, ignore autofs mounts */
-	if (!strcmp(cursor->fstype, "autofs"))
+	if (!strcmp(md->fstype, "autofs"))
 		return true;
 
 	dtype = fsutil_get_dtype(cursor->mountpoint);
 
-	if (strcmp(cursor->fstype, "overlay") || BIND_SYSTEM_OVERLAYS) {
+	if (strcmp(md->fstype, "overlay") || BIND_SYSTEM_OVERLAYS) {
 		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_TRANSPARENT, dtype, NULL, 0);
 	} else {
 		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_STACKED, dtype, NULL, 0);
@@ -96,11 +97,11 @@ system_mount_tree_maybe_add_transparent(struct fstree *fstree, const fsutil_moun
 	if (node->mount_detail) {
 		/* It's a setup problem for the system, but not a problem for us as we just bind mount
 		 * what's there. */
-		log_warning("%s: duplicate system mount (%s and %s)", cursor->mountpoint, node->mount_detail->fstype, cursor->fstype);
+		log_warning("%s: duplicate system mount (%s and %s)", cursor->mountpoint, node->mount_detail->fstype, md->fstype);
 		return false;
 	}
 
-	node->mount_detail = fsutil_mount_detail_new(cursor->fstype, cursor->fsname, cursor->options);
+	node->mount_detail = fsutil_mount_detail_hold(md);
 	node->mount_ops = &mount_ops_bind;
 
 	return true;
@@ -154,15 +155,16 @@ system_mount_tree_discover_boot(struct fstree *fstree)
 		return false;
 
 	while (fsutil_mount_iterator_next(it, &cursor)) {
+		fsutil_mount_detail_t *md = cursor.detail;
 		fstree_node_t *node;
 
-		if (fsutil_mount_options_contain(cursor.options, "noauto"))
+		if (fsutil_mount_options_contain(md->options, "noauto"))
 			continue;
 
-		if (!strcmp(cursor.fstype, "swap"))
+		if (!strcmp(md->fstype, "swap"))
 			continue;
 
-		if (!strcmp(cursor.fstype, "nfs")) {
+		if (!strcmp(md->fstype, "nfs")) {
 			log_warning("Ignoring NFS file system at %s for now", cursor.mountpoint);
 			continue;
 		}
@@ -172,15 +174,15 @@ system_mount_tree_discover_boot(struct fstree *fstree)
 			return false;
 
 		strutil_set(&node->mountpoint, node->relative_path);
-		node->mount_detail = fsutil_mount_detail_new(cursor.fstype, cursor.fsname, cursor.options);
+		node->mount_detail = fsutil_mount_detail_hold(md);
 
-		if (!strncmp(cursor.fsname, "UUID=", 5)) {
+		if (!strncmp(md->fsname, "UUID=", 5)) {
 			char *real_device;
 
-			real_device = fsutil_resolve_fsuuid(cursor.fsname + 5);
+			real_device = fsutil_resolve_fsuuid(md->fsname + 5);
 			if (real_device) {
-				strutil_drop(&node->mount_detail->fsname);
-				node->mount_detail->fsname = real_device;
+				strutil_drop(&md->fsname);
+				md->fsname = real_device;
 				node->mount_ops = &mount_ops_direct;
 			}
 		}

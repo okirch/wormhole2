@@ -35,7 +35,9 @@ struct fsutil_mount_iterator {
 	FILE *		mf;
 	int		type;
 	char *		strip_prefix;
+
 	struct strutil_array overlay_dirs;
+	fsutil_mount_detail_t *	detail;
 };
 
 static fsutil_mount_iterator_t *
@@ -114,6 +116,16 @@ fsutil_mount_iterator_close(fsutil_mount_iterator_t *it)
 	}
 }
 
+static void
+fsutil_mount_iterator_zap_state(fsutil_mount_iterator_t *it)
+{
+	strutil_array_destroy(&it->overlay_dirs);
+	if (it->detail) {
+		fsutil_mount_detail_release(it->detail);
+		it->detail = NULL;
+	}
+}
+
 bool
 fsutil_mount_iterator_next(fsutil_mount_iterator_t *it, fsutil_mount_cursor_t *cursor)
 {
@@ -122,7 +134,8 @@ fsutil_mount_iterator_next(fsutil_mount_iterator_t *it, fsutil_mount_cursor_t *c
 	if (!it->mf)
 		return false;
 
-	strutil_array_destroy(&it->overlay_dirs);
+	fsutil_mount_iterator_zap_state(it);
+
 	if (!fsutil_mount_iterator_getmntent(it, cursor)) {
 		fsutil_mount_iterator_close(it);
 		return false;
@@ -135,7 +148,7 @@ void
 fsutil_mount_iterator_free(fsutil_mount_iterator_t *it)
 {
 	fsutil_mount_iterator_close(it);
-	strutil_array_destroy(&it->overlay_dirs);
+	fsutil_mount_iterator_zap_state(it);
 	strutil_drop(&it->strip_prefix);
 	free(it);
 }
@@ -174,16 +187,21 @@ __process_overlay_options(fsutil_mount_iterator_t *it, const char *options)
 static void
 fsutil_mount_cursor_set(struct fsutil_mount_iterator *it, fsutil_mount_cursor_t *cursor, const char *mount_point, const char *fstype, const char *fsname, const char *options)
 {
+	fsutil_mount_detail_t *md;
+
 	if (options && !strcmp(options, "defaults"))
 		options = NULL;
 
-	cursor->mountpoint = mount_point;
-	cursor->fstype = fstype;
-	cursor->fsname = fsname;
-	cursor->options = options;
+	md = fsutil_mount_detail_new(fstype, fsname, options);
+	it->detail = md;	/* valid until next invocation */
 
-	if (!strcmp(cursor->fstype, "overlay"))
-		cursor->overlay.dirs = __process_overlay_options(it, cursor->options);
+	cursor->mountpoint = mount_point;
+	cursor->detail = md;	/* return the details in cursor. Note, the cursor itself
+				 * does not hold a reference, so that we can simply clean
+				 * it using memset. */
+
+	if (!strcmp(fstype, "overlay"))
+		cursor->overlay.dirs = __process_overlay_options(it, md->options);
 }
 
 static inline const char *
