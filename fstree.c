@@ -550,64 +550,6 @@ fstree_node_mount(const struct fstree_node *node)
 		(void) fsutil_makedirs(node->mountpoint, 0755);
 
 	return node->mount_ops->mount(node);
-
-#if 0
-	if (strcmp(node->fstype, "overlay")) {
-		const char *fsname = "wormhole";
-
-		if (!strcmp(node->fstype, "bind")) {
-			const char *bind_source = node->relative_path;
-
-			if (node->bind_mount_override_layer)
-				bind_source = __pathutil_concat2(node->bind_mount_override_layer->image_path, bind_source);
-
-			trace("Bind mounting %s on %s\n", bind_source, node->relative_path);
-			if (!fsutil_isdir(bind_source)
-			 && fsutil_isdir(node->mountpoint)) {
-				trace("  Need to change %s from dir to file", node->mountpoint);
-				rmdir(node->mountpoint);
-				fsutil_makefile(node->mountpoint, 0644);
-			}
-			return fsutil_mount_bind(bind_source, node->mountpoint, true);
-		}
-
-		trace("Mounting %s file system on %s\n", node->fstype, node->relative_path);
-		if (mount(fsname, node->mountpoint, node->fstype, MS_NOATIME|MS_LAZYTIME, NULL) < 0) {
-			log_error("Unable to mount %s fs on %s: %m\n", node->fstype, node->mountpoint);
-			return NULL;
-		}
-		return true;
-	}
-
-	if (node->dtype >= 0 && node->dtype != DT_DIR && node->dtype != DT_REG && node->dtype != DT_LNK)
-		log_warning("%s is a %s; building an overlay will probably fail",
-				node->relative_path, fsutil_dtype_as_string(node->dtype));
-
-	if (!(lowerspec = fstree_node_build_lowerspec(node)))
-		return false;
-
-	if (!node->readonly)
-		snprintf(options, sizeof(options),
-			"userxattr,lowerdir=%s,upperdir=%s,workdir=%s",
-			lowerspec, node->upper, node->work);
-	else
-		snprintf(options, sizeof(options),
-			"userxattr,lowerdir=/%s,workdir=%s",
-			lowerspec, node->work);
-
-	trace("Mounting %s file system on %s (options=%s)\n", node->fstype, node->relative_path, options);
-	if (mount("wormhole", node->mountpoint, "overlay", MS_NOATIME|MS_LAZYTIME, options) < 0) {
-		log_error("Unable to mount %s: %m\n", node->mountpoint);
-		free(lowerspec);
-		return NULL;
-	}
-
-	trace2("Mounted %s: %s\n", node->mountpoint, lowerspec);
-	trace3("  mount option %s", options);
-
-	free(lowerspec);
-	return node;
-#endif
 }
 
 bool
