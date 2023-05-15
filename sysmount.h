@@ -30,6 +30,12 @@ struct fsutil_mount_detail {
 	struct strutil_array overlay_dirs;
 };
 
+typedef struct fsutil_mount_req fsutil_mount_req_t;
+struct fsutil_mount_req {
+	char *			mount_point;
+	fsutil_mount_detail_t *	detail;
+};
+
 typedef struct fsutil_mount_detail_array {
 	unsigned int	count;
 	fsutil_mount_detail_t **data;
@@ -38,6 +44,8 @@ typedef struct fsutil_mount_detail_array {
 extern fsutil_mount_detail_t *	fsutil_mount_detail_new(const char *fstype, const char *fsname, const char *options);
 extern fsutil_mount_detail_t *	fsutil_mount_detail_hold(fsutil_mount_detail_t *md);
 extern void			fsutil_mount_detail_release(fsutil_mount_detail_t *md);
+
+extern void			fsutil_mount_req_destroy(fsutil_mount_req_t *);
 
 extern void			fsutil_mount_detail_array_append(fsutil_mount_detail_array_t *, fsutil_mount_detail_t *);
 extern void			fsutil_mount_detail_array_destroy(fsutil_mount_detail_array_t *);

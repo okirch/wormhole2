@@ -2006,6 +2006,16 @@ fsutil_mount_detail_array_destroy(fsutil_mount_detail_array_t *a)
 	memset(a, 0, sizeof(*a));
 }
 
+void
+fsutil_mount_req_destroy(fsutil_mount_req_t *mr)
+{
+	if (mr->detail) {
+		fsutil_mount_detail_release(mr->detail);
+		mr->detail = NULL;
+	}
+	strutil_drop(&mr->mount_point);
+}
+
 bool
 fsutil_make_fs_private(const char *dir, bool maybe_in_chroot)
 {

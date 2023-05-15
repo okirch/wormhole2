@@ -3,6 +3,8 @@
  - mount devpts
  - handle resolv.conf and other network related files
  - handle x-initrd.mounts and x-systemd.* options in fstab?
+ - make the host sshd listen on port 222
+    - echo "Port 222" > /etc/ssh/sshd_config.d/alp.conf
+    - Frob the SELinux setup to grant sshd access to the new port
 
  - represent bind mounts as a leaf with fstype "bind" and the source dir in lowerdir
- - 

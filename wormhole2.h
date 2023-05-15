@@ -70,10 +70,10 @@ struct fstree_node {
 	char *		full_path;
 	char *		upper;
 	char *		work;
-	char *		mountpoint;
 
 	mount_ops_t *	mount_ops;
-	fsutil_mount_detail_t *mount_detail;
+
+	fsutil_mount_req_t	mount;
 
 	struct wormhole_layer *bind_mount_override_layer;
 	struct wormhole_layer_array attached_layers;

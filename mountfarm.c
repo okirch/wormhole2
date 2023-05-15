@@ -619,7 +619,7 @@ __mount_farm_mount_one(const struct fstree_node *node)
 	if (node->mount_ops == NULL)
 		return true;
 
-	trace2("About to mount %s using %s mount driver", node->mountpoint, node->mount_ops->name);
+	trace2("About to mount %s using %s mount driver", node->mount.mount_point, node->mount_ops->name);
 	if (!fstree_node_mount(node))
 		return false;
 

@@ -110,7 +110,9 @@ fstree_node_free(struct fstree_node *node)
 	strutil_drop(&node->full_path);
 	strutil_drop(&node->upper);
 	strutil_drop(&node->work);
-	strutil_drop(&node->mountpoint);
+
+	/* Destroys attached_layers and the mount_req */
+	fstree_node_reset(node);
 }
 
 struct fstree_node *
@@ -286,8 +288,8 @@ fstree_node_zap_dirs(struct fstree_node *node)
 		to_zap[i++] = node->upper;
 	if (node->work)
 		to_zap[i++] = node->work;
-	if (node->mountpoint)
-		to_zap[i++] = node->mountpoint;
+	if (node->mount.mount_point)
+		to_zap[i++] = node->mount.mount_point;
 
 	while (i--) {
 		const char *dir = to_zap[i];
@@ -319,10 +321,10 @@ fstree_node_set_fstype(struct fstree_node *node, mount_ops_t *mount_ops, struct 
 	if (!node->work)
 		strutil_set(&node->work, fsutil_makedir2(farm->work_base, node->relative_path));
 
-	if (!node->mountpoint)
-		strutil_set(&node->mountpoint, fsutil_makedir2(farm->chroot, node->relative_path));
+	if (!node->mount.mount_point)
+		strutil_set(&node->mount.mount_point, fsutil_makedir2(farm->chroot, node->relative_path));
 
-	return node->upper && node->work && node->mountpoint;
+	return node->upper && node->work && node->mount.mount_point;
 }
 
 void
@@ -333,11 +335,7 @@ fstree_node_reset(struct fstree_node *node)
 	node->export_flags = 0;
 	node->dtype = DT_UNKNOWN;
 	wormhole_layer_array_destroy(&node->attached_layers);
-
-	if (node->mount_detail) {
-		fsutil_mount_detail_release(node->mount_detail);
-		node->mount_detail = NULL;
-	}
+	fsutil_mount_req_destroy(&node->mount);
 }
 
 /*
@@ -352,9 +350,9 @@ fstree_node_invalidate(struct fstree_node *node)
 	node->mount_ops = NULL;
 
 	fstree_node_zap_dirs(node);
+	fsutil_mount_req_destroy(&node->mount);
 	strutil_drop(&node->upper);
 	strutil_drop(&node->work);
-	strutil_drop(&node->mountpoint);
 }
 
 char *
@@ -396,12 +394,12 @@ __fstree_node_mount_bind(const struct fstree_node *node)
 
 	trace("Bind mounting %s on %s\n", bind_source, node->relative_path);
 	if (!fsutil_isdir(bind_source)
-	 && fsutil_isdir(node->mountpoint)) {
-		trace("  Need to change %s from dir to file", node->mountpoint);
-		rmdir(node->mountpoint);
-		fsutil_makefile(node->mountpoint, 0644);
+	 && fsutil_isdir(node->mount.mount_point)) {
+		trace("  Need to change %s from dir to file", node->mount.mount_point);
+		rmdir(node->mount.mount_point);
+		fsutil_makefile(node->mount.mount_point, 0644);
 	}
-	return fsutil_mount_bind(bind_source, node->mountpoint, true);
+	return fsutil_mount_bind(bind_source, node->mount.mount_point, true);
 }
 
 mount_ops_t	mount_ops_bind = {
@@ -435,13 +433,13 @@ __fstree_node_mount_overlay(const struct fstree_node *node)
 			lowerspec, node->work);
 
 	trace("Mounting overlay file system on %s (options=%s)\n", node->relative_path, options);
-	if (mount("wormhole", node->mountpoint, "overlay", MS_NOATIME|MS_LAZYTIME, options) < 0) {
-		log_error("Unable to mount %s: %m\n", node->mountpoint);
+	if (mount("wormhole", node->mount.mount_point, "overlay", MS_NOATIME|MS_LAZYTIME, options) < 0) {
+		log_error("Unable to mount %s: %m\n", node->mount.mount_point);
 		free(lowerspec);
 		return false;
 	}
 
-	trace2("Mounted %s: %s\n", node->mountpoint, lowerspec);
+	trace2("Mounted %s: %s\n", node->mount.mount_point, lowerspec);
 	trace3("  mount option %s", options);
 
 	free(lowerspec);
@@ -463,8 +461,8 @@ __fstree_node_mount_virtual(const struct fstree_node *node)
 	const char *fsname = "wormhole";
 
 	trace("Mounting %s file system on %s\n", fstype, node->relative_path);
-	if (mount(fsname, node->mountpoint, fstype, MS_NOATIME|MS_LAZYTIME, NULL) < 0) {
-		log_error("Unable to mount %s fs on %s: %m\n", fstype, node->mountpoint);
+	if (mount(fsname, node->mount.mount_point, fstype, MS_NOATIME|MS_LAZYTIME, NULL) < 0) {
+		log_error("Unable to mount %s fs on %s: %m\n", fstype, node->mount.mount_point);
 		return NULL;
 	}
 	return true;
@@ -481,9 +479,10 @@ mount_ops_t	mount_ops_tmpfs = {
 static bool
 __fstree_node_mount_direct(const struct fstree_node *node)
 {
-	const char *mount_point;
+	const char *mount_point = node->mount.mount_point;
+	fsutil_mount_detail_t *detail;
 
-	if (!node->mount_detail) {
+	if (!(detail = node->mount.detail)) {
 		log_error("direct mount: lacking fstype, device etc");
 		return false;
 	}
@@ -493,13 +492,13 @@ __fstree_node_mount_direct(const struct fstree_node *node)
 		return false;
 	}
 
-	trace("mounting %s below %s\n", node->mountpoint, node->root->path);
+	trace("mounting %s below %s\n", mount_point, node->root->path);
 
-	mount_point = __pathutil_concat2(node->root->path, node->mountpoint);
-	return fsutil_mount(node->mount_detail->fsname,
+	mount_point = __pathutil_concat2(node->root->path, mount_point);
+	return fsutil_mount(detail->fsname,
 			mount_point,
-			node->mount_detail->fstype,
-			node->mount_detail->options);
+			detail->fstype,
+			detail->options);
 }
 
 mount_ops_t	mount_ops_direct = {
@@ -513,7 +512,7 @@ mount_ops_t	mount_ops_direct = {
 static bool
 __fstree_node_mount_command(const struct fstree_node *node)
 {
-	const char *root_path;
+	const char *root_path, *mount_point;
 
 	if (!node->root) {
 		log_error("mountcmd: will operate only on nodes that have a fsroot set");
@@ -521,9 +520,10 @@ __fstree_node_mount_command(const struct fstree_node *node)
 	}
 
 	root_path = node->root->path;
+	mount_point = node->mount.mount_point;
 
-	trace("mounting %s below %s\n", node->mountpoint, root_path);
-	return fsutil_mount_command(node->mountpoint, root_path);
+	trace("mounting %s below %s\n", mount_point, root_path);
+	return fsutil_mount_command(mount_point, root_path);
 }
 
 mount_ops_t	mount_ops_mountcmd = {
@@ -547,7 +547,7 @@ fstree_node_mount(const struct fstree_node *node)
 #endif
 
 	if (node->parent && node->parent->export_type == WORMHOLE_EXPORT_ROOT)
-		(void) fsutil_makedirs(node->mountpoint, 0755);
+		(void) fsutil_makedirs(node->mount.mount_point, 0755);
 
 	return node->mount_ops->mount(node);
 }
@@ -603,9 +603,9 @@ __fstree_node_print(const struct fstree_node *node)
 		name = "/";
 
 	type = mount_export_type_as_string(node->export_type);
-	if (node->mountpoint) {
+	if (node->mount.mount_point) {
 		trace("%*.*s%s %-12s [%s mount on %s]", ws, ws, "", name, type,
-			       fstree_node_fstype(node), node->mountpoint);
+			       fstree_node_fstype(node), node->mount.mount_point);
 	} else {
 		trace("%*.*s%s %s", ws, ws, "", name, type);
 	}
