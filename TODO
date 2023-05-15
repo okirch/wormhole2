@@ -1,6 +1,5 @@
 
  - in boot mode, set SELinux context to unconfined
- - mount devpts
  - handle resolv.conf and other network related files
  - handle x-initrd.mounts and x-systemd.* options in fstab?
  - make the host sshd listen on port 222
