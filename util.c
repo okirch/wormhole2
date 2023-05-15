@@ -290,9 +290,24 @@ procutil_command_init(struct procutil_command *cmd, char **argv)
 	cmd->argv = argv;
 }
 
+void
+procutil_command_require_virtual_fs(struct procutil_command *cmd, const char *fstype, const char *mount_point, const char *options)
+{
+	fsutil_mount_req_array_append(&cmd->mounts, mount_point, fsutil_mount_detail_new(fstype, fstype, options));
+}
+
+void
+procutil_command_destroy(struct procutil_command *cmd)
+{
+	fsutil_mount_req_array_destroy(&cmd->mounts);
+	memset(cmd, 0, sizeof(*cmd));
+}
+
 bool
 procutil_command_exec(struct procutil_command *cmd, const char *command)
 {
+	unsigned int i;
+
 	if (cmd->root_directory) {
 		if (chroot(cmd->root_directory) < 0) {
 			log_error("Unable to chroot to %s: %m", cmd->root_directory);
@@ -312,9 +327,18 @@ procutil_command_exec(struct procutil_command *cmd, const char *command)
 		}
 	}
 
-	if (cmd->procfs_mountpoint) {
-		if (!fsutil_mount_virtual_fs(cmd->procfs_mountpoint, "proc", NULL)) {
-			log_error("Unable to mount procfs on %s: %m", cmd->procfs_mountpoint);
+	for (i = 0; i < cmd->mounts.count; ++i) {
+		fsutil_mount_req_t *mr = &cmd->mounts.data[i];
+
+		/* We get here when we're asked to mount /proc or /dev/pts,
+		 * which are sensitive to which namespace their attached.
+		 * However, we may have previously performed a recursive
+		 * bind on /dev, which also caused /dev/pts to get mounted.
+		 * Get rid of this first */
+		(void) umount2(mr->mount_point, MNT_DETACH);
+
+		if (!fsutil_mount_request(mr)) {
+			log_error("Unable to mount %s: %m", mr->mount_point);
 			exit(70);
 		}
 	}
@@ -1868,12 +1892,26 @@ fsutil_mount(const char *device, const char *where, const char *fstype, const ch
 	int flags = 0;
 
 	if (mount(device, where, fstype, flags, options) < 0) {
-		log_error("Unable to mount %s file system on %s: %m", fstype, where);
+		log_error("Unable to mount %s file system on %s with options %s: %m", fstype, where, options);
 		return false;
 	}
 
 	trace2("Successfully mounted %s file system %s on %s (options %s)", fstype, device, where, options);
 	return true;
+}
+
+bool
+fsutil_mount_request(const fsutil_mount_req_t *mr)
+{
+	fsutil_mount_detail_t *detail;
+
+	if (!(detail = mr->detail) || !mr->mount_point) {
+		log_error("%s: incomplete mount request", __func__);
+		errno = EINVAL;
+		return false;
+	}
+
+	return fsutil_mount(detail->fsname, mr->mount_point, detail->fstype, detail->options);
 }
 
 bool
@@ -2014,6 +2052,35 @@ fsutil_mount_req_destroy(fsutil_mount_req_t *mr)
 		mr->detail = NULL;
 	}
 	strutil_drop(&mr->mount_point);
+}
+
+void
+fsutil_mount_req_array_append(fsutil_mount_req_array_t *a, const char *mount_point, fsutil_mount_detail_t *detail)
+{
+	fsutil_mount_req_t *mr;
+
+	if ((a->count & 15) == 0) {
+		a->data = realloc(a->data, (a->count + 16) * sizeof(a->data[0]));
+	}
+
+	mr = &a->data[a->count++];
+	memset(mr, 0, sizeof(*mr));
+
+	strutil_set(&mr->mount_point, mount_point);
+	mr->detail = fsutil_mount_detail_hold(detail);
+}
+
+void
+fsutil_mount_req_array_destroy(fsutil_mount_req_array_t *a)
+{
+	unsigned int i;
+
+	for (i = 0; i < a->count; ++i)
+		fsutil_mount_req_destroy(&a->data[i]);
+
+	if (a->data)
+		free(a->data);
+	memset(a, 0, sizeof(*a));
 }
 
 bool

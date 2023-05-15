@@ -211,6 +211,7 @@ system_mount_tree_discover_boot(struct fstree *fstree)
 	fstree_hide_pattern(fstree, "/dev");
 	fstree_hide_pattern(fstree, "/sys");
 	fstree_hide_pattern(fstree, "/proc");
+	fstree_hide_pattern(fstree, "/dev/pts");
 	fstree_hide_pattern(fstree, "/run");
 
 	return true;
@@ -902,11 +903,12 @@ __perform_boot(struct wormhole_context *ctx)
 		goto out;
 
 	/* Do not mount a procfs here, but do it after fork() so that we see
-	 * the pids of the new namespace */
-	ctx->command.procfs_mountpoint = "/proc";
-
-	/* FIXME: there may be more file systems that need to be mounted
-	 * between fork and exec, e.g. devpts */
+	 * the pids of the new namespace.
+	 * The same applies to /dev/pts.
+	 */
+	procutil_command_require_virtual_fs(&ctx->command, "proc", "/proc", NULL);
+	procutil_command_require_virtual_fs(&ctx->command, "devpts", "/dev/pts",
+			"gid=5,mode=620,ptmxmode=000");
 
 	if (ctx->command.argv == NULL) {
 		char *argv_init[] = {

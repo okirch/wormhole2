@@ -41,14 +41,20 @@ typedef struct fsutil_mount_detail_array {
 	fsutil_mount_detail_t **data;
 } fsutil_mount_detail_array_t;
 
+typedef struct fsutil_mount_req_array {
+	unsigned int	count;
+	fsutil_mount_req_t *data;
+} fsutil_mount_req_array_t;
+
 extern fsutil_mount_detail_t *	fsutil_mount_detail_new(const char *fstype, const char *fsname, const char *options);
 extern fsutil_mount_detail_t *	fsutil_mount_detail_hold(fsutil_mount_detail_t *md);
 extern void			fsutil_mount_detail_release(fsutil_mount_detail_t *md);
-
-extern void			fsutil_mount_req_destroy(fsutil_mount_req_t *);
-
 extern void			fsutil_mount_detail_array_append(fsutil_mount_detail_array_t *, fsutil_mount_detail_t *);
 extern void			fsutil_mount_detail_array_destroy(fsutil_mount_detail_array_t *);
+
+extern void			fsutil_mount_req_destroy(fsutil_mount_req_t *);
+extern void			fsutil_mount_req_array_append(fsutil_mount_req_array_t *, const char *mount_point, fsutil_mount_detail_t *);
+extern void			fsutil_mount_req_array_destroy(fsutil_mount_req_array_t *);
 
 extern bool			fsutil_mount_overlay(const char *lowerdir,
 					const char *upperdir,
@@ -66,6 +72,7 @@ extern bool			fsutil_mount(const char *device,
 					const char *target,
 					const char *fstype,
 					const char *options);
+extern bool			fsutil_mount_request(const fsutil_mount_req_t *mr);
 extern bool			fsutil_lazy_umount(const char *path);
 extern bool			fsutil_make_fs_private(const char *dir, bool maybe_in_chroot);
 extern bool			fsutil_same_file(const char *path1, const char *path2);

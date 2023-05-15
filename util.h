@@ -48,7 +48,7 @@ extern char *			pathutil_expand(const char *orig_path, bool quiet);
 struct procutil_command {
 	const char *	root_directory;
 	const char *	working_directory;
-	const char *	procfs_mountpoint;
+	fsutil_mount_req_array_t mounts;
 	char **		argv;
 };
 
@@ -70,6 +70,9 @@ enum {
 extern int			procutil_fork_and_wait(int *exit_status);
 
 extern void			procutil_command_init(struct procutil_command *cmd, char **argv);
+extern void			procutil_command_require_virtual_fs(struct procutil_command *cmd,
+					const char *fstype, const char *mount_point,
+					const char *options);
 extern bool			procutil_command_run(struct procutil_command *cmd, int *status_ret);
 extern bool			procutil_command_exec(struct procutil_command *cmd, const char *argv0);
 
