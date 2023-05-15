@@ -27,6 +27,7 @@ struct fsutil_mount_detail {
 	char *		fstype;
 	char *		fsname;
 	char *		options;
+	int		flags;
 	struct strutil_array overlay_dirs;
 };
 
@@ -71,7 +72,8 @@ extern bool			fsutil_mount_command(const char *target,
 extern bool			fsutil_mount(const char *device,
 					const char *target,
 					const char *fstype,
-					const char *options);
+					const char *options,
+					int flags);
 extern bool			fsutil_mount_request(const fsutil_mount_req_t *mr);
 extern bool			fsutil_lazy_umount(const char *path);
 extern bool			fsutil_make_fs_private(const char *dir, bool maybe_in_chroot);

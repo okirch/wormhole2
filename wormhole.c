@@ -906,9 +906,10 @@ __perform_boot(struct wormhole_context *ctx)
 	 * the pids of the new namespace.
 	 * The same applies to /dev/pts.
 	 */
-	procutil_command_require_virtual_fs(&ctx->command, "proc", "/proc", NULL);
+	procutil_command_require_virtual_fs(&ctx->command, "proc", "/proc", NULL,
+			MS_NODEV | MS_NOSUID | MS_NOEXEC);
 	procutil_command_require_virtual_fs(&ctx->command, "devpts", "/dev/pts",
-			"gid=5,mode=620,ptmxmode=000");
+			"gid=5,mode=620,ptmxmode=000", MS_NOSUID | MS_NOEXEC);
 
 	if (ctx->command.argv == NULL) {
 		char *argv_init[] = {

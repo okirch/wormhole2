@@ -498,7 +498,8 @@ __fstree_node_mount_direct(const struct fstree_node *node)
 	return fsutil_mount(detail->fsname,
 			mount_point,
 			detail->fstype,
-			detail->options);
+			detail->options,
+			detail->flags);
 }
 
 mount_ops_t	mount_ops_direct = {

@@ -72,7 +72,7 @@ extern int			procutil_fork_and_wait(int *exit_status);
 extern void			procutil_command_init(struct procutil_command *cmd, char **argv);
 extern void			procutil_command_require_virtual_fs(struct procutil_command *cmd,
 					const char *fstype, const char *mount_point,
-					const char *options);
+					const char *options, int flags);
 extern bool			procutil_command_run(struct procutil_command *cmd, int *status_ret);
 extern bool			procutil_command_exec(struct procutil_command *cmd, const char *argv0);
 

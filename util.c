@@ -291,9 +291,16 @@ procutil_command_init(struct procutil_command *cmd, char **argv)
 }
 
 void
-procutil_command_require_virtual_fs(struct procutil_command *cmd, const char *fstype, const char *mount_point, const char *options)
+procutil_command_require_virtual_fs(struct procutil_command *cmd, const char *fstype, const char *mount_point,
+			const char *options, int flags)
 {
-	fsutil_mount_req_array_append(&cmd->mounts, mount_point, fsutil_mount_detail_new(fstype, fstype, options));
+	fsutil_mount_detail_t *detail;
+
+	detail = fsutil_mount_detail_new(fstype, fstype, options);
+	detail->flags = flags;
+
+	fsutil_mount_req_array_append(&cmd->mounts, mount_point, detail);
+	fsutil_mount_detail_release(detail);
 }
 
 void
@@ -1887,10 +1894,8 @@ fsutil_mount_tmpfs(const char *where)
 }
 
 bool
-fsutil_mount(const char *device, const char *where, const char *fstype, const char *options)
+fsutil_mount(const char *device, const char *where, const char *fstype, const char *options, int flags)
 {
-	int flags = 0;
-
 	if (mount(device, where, fstype, flags, options) < 0) {
 		log_error("Unable to mount %s file system on %s with options %s: %m", fstype, where, options);
 		return false;
@@ -1911,7 +1916,7 @@ fsutil_mount_request(const fsutil_mount_req_t *mr)
 		return false;
 	}
 
-	return fsutil_mount(detail->fsname, mr->mount_point, detail->fstype, detail->options);
+	return fsutil_mount(detail->fsname, mr->mount_point, detail->fstype, detail->options, detail->flags);
 }
 
 bool
