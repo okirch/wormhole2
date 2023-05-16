@@ -1103,6 +1103,7 @@ static struct option	long_options[] = {
 	{ "upstream-socket",	required_argument,	NULL,		'U' },
 	{ "downstream-socket",	required_argument,	NULL,		'D' },
 	{ "config",		required_argument,	NULL,		'C' },
+	{ "foreground",		no_argument,		NULL,		'F' },
 	{ NULL, }
 };
 
@@ -1187,13 +1188,14 @@ main(int argc, char **argv)
 {
 	struct config config;
 	dbus_bridge_port_t *port_upstream, *port_downstream;
+	bool opt_foreground = false;
 	sd_event *event = NULL;
 	unsigned int i;
 	int c;
 
 	memset(&config, 0, sizeof(config));
 
-	while ((c = getopt_long(argc, argv, "dC:D:U:", long_options, NULL)) != EOF) {
+	while ((c = getopt_long(argc, argv, "dFC:D:U:", long_options, NULL)) != EOF) {
 		switch (c) {
 		case 'd':
 			tracing_increment_level();
@@ -1210,6 +1212,10 @@ main(int argc, char **argv)
 
 		case 'U':
 			strutil_set(&config.upstream_socket, optarg);
+			break;
+
+		case 'F':
+			opt_foreground = true;
 			break;
 
 		default:
@@ -1243,7 +1249,15 @@ main(int argc, char **argv)
 	if (!dbus_bridge_port_monitor(port_upstream, false))
 		return 1;
 
-	dbus_bridge_port_list_names(port_upstream);
+	if (!dbus_bridge_port_list_names(port_upstream))
+		return 1;
+
+	if (!opt_foreground) {
+		if (daemon(0, 0) < 0)
+			log_fatal("Unable to background dbus-relay: %m");
+
+		set_syslog("dbus-relay", -1);
+	}
 
 	sd_event_loop(event);
 	return 0;
