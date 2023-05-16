@@ -1103,6 +1103,7 @@ static struct option	long_options[] = {
 	{ "upstream-socket",	required_argument,	NULL,		'U' },
 	{ "downstream-socket",	required_argument,	NULL,		'D' },
 	{ "config",		required_argument,	NULL,		'C' },
+	{ "system-root",	required_argument,	NULL,		'R' },
 	{ "foreground",		no_argument,		NULL,		'F' },
 	{ NULL, }
 };
@@ -1110,6 +1111,7 @@ static struct option	long_options[] = {
 struct config {
 	char *			upstream_socket;
 	char *			downstream_socket;
+	char *			system_root;
 
 	struct strutil_array	services;
 };
@@ -1167,6 +1169,8 @@ parse_config_file(struct config *cfg, const char *pathname)
 			strutil_set(&cfg->upstream_socket, value);
 		else if (!strcmp(kwd, "downstream-socket"))
 			strutil_set(&cfg->downstream_socket, value);
+		else if (!strcmp(kwd, "system-root"))
+			strutil_set(&cfg->system_root, value);
 		else if (!strcmp(kwd, "service"))
 			strutil_array_append(&cfg->services, value);
 		else {
@@ -1195,7 +1199,7 @@ main(int argc, char **argv)
 
 	memset(&config, 0, sizeof(config));
 
-	while ((c = getopt_long(argc, argv, "dFC:D:U:", long_options, NULL)) != EOF) {
+	while ((c = getopt_long(argc, argv, "dFC:D:R:U:", long_options, NULL)) != EOF) {
 		switch (c) {
 		case 'd':
 			tracing_increment_level();
@@ -1208,6 +1212,10 @@ main(int argc, char **argv)
 
 		case 'D':
 			strutil_set(&config.downstream_socket, optarg);
+			break;
+
+		case 'R':
+			strutil_set(&config.system_root, optarg);
 			break;
 
 		case 'U':
@@ -1226,6 +1234,12 @@ main(int argc, char **argv)
 
 	if (config.services.count == 0)
 		log_fatal("No service names configured");
+
+	if (config.system_root) {
+		const char *socket_path = config.downstream_socket? : DBUS_SYSTEM_BUS_SOCKET;
+
+		pathutil_concat2(&config.downstream_socket, config.system_root, socket_path);
+	} else
 	if (config.downstream_socket == NULL)
 		log_fatal("No downstream name configured");
 
