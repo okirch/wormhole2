@@ -25,6 +25,7 @@
 #include <sys/stat.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <dirent.h>
 
 struct strutil_array {
