@@ -207,6 +207,9 @@ log_fatal(const char *fmt, ...)
 void
 set_syslog(const char *name, int facility)
 {
+	if (facility < 0)
+		facility = LOG_DAEMON;
+
 	openlog(name, 0, facility);
 	logging_to_syslog = true;
 }
