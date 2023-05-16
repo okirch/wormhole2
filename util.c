@@ -291,6 +291,15 @@ procutil_command_init(struct procutil_command *cmd, char **argv)
 }
 
 void
+procutil_command_setenv(struct procutil_command *cmd, const char *name, const char *value)
+{
+	char envbuf[256];
+
+	snprintf(envbuf, sizeof(envbuf), "%s=%s", name, value);
+	strutil_array_append(&cmd->env, envbuf);
+}
+
+void
 procutil_command_require_virtual_fs(struct procutil_command *cmd, const char *fstype, const char *mount_point,
 			const char *options, int flags)
 {
@@ -307,6 +316,7 @@ void
 procutil_command_destroy(struct procutil_command *cmd)
 {
 	fsutil_mount_req_array_destroy(&cmd->mounts);
+	strutil_array_destroy(&cmd->env);
 	memset(cmd, 0, sizeof(*cmd));
 }
 
@@ -348,6 +358,10 @@ procutil_command_exec(struct procutil_command *cmd, const char *command)
 			log_error("Unable to mount %s: %m", mr->mount_point);
 			exit(70);
 		}
+	}
+
+	for (i = 0; i < cmd->env.count; ++i) {
+		putenv(cmd->env.data[i]);
 	}
 
 	trace("Executing \"%s\"", procutil_concat_argv(-1, cmd->argv));

@@ -46,10 +46,11 @@ extern void			pathutil_concat2(char **path_p, const char *parent, const char *na
 extern char *			pathutil_expand(const char *orig_path, bool quiet);
 
 struct procutil_command {
-	const char *	root_directory;
-	const char *	working_directory;
+	const char *		root_directory;
+	const char *		working_directory;
 	fsutil_mount_req_array_t mounts;
-	char **		argv;
+	struct strutil_array	env;
+	char **			argv;
 };
 
 extern const char *		procutil_concat_argv(int argc, char **argv);
@@ -70,6 +71,9 @@ enum {
 extern int			procutil_fork_and_wait(int *exit_status);
 
 extern void			procutil_command_init(struct procutil_command *cmd, char **argv);
+extern void			procutil_command_destroy(struct procutil_command *cmd);
+extern void			procutil_command_setenv(struct procutil_command *cmd,
+					const char *name, const char *value);
 extern void			procutil_command_require_virtual_fs(struct procutil_command *cmd,
 					const char *fstype, const char *mount_point,
 					const char *options, int flags);
