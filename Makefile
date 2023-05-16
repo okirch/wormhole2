@@ -15,6 +15,7 @@ CFLAGS		= -Wall -D_GNU_SOURCE $(COPT) -Wformat-truncation=0 -I.
 WORMHOLE	= wormhole
 WORMHOLE_SRCS	= wormhole.c
 WORMHOLE_OBJS	= $(WORMHOLE_SRCS:.c=.o)
+BOOTPREP	= boot-prep.sh
 
 LIBDEPS		= $(LIBWORMHOLE) $(LIBOWL)
 LINK		= -L. -lowl -lsystemd -lwormhole -lutil
@@ -72,6 +73,8 @@ install: $(WORMHOLE) $(IMGDELTA) $(DBUSRELAY)
 	install -m 555 -s $(WORMHOLE) $(DESTDIR)$(BINDIR)
 	install -m 555 -s $(IMGDELTA) $(DESTDIR)$(BINDIR)
 	install -m 555 -s $(DBUSRELAY) $(DESTDIR)$(BINDIR)
+	install -m 755 -d $(DESTDIR)$(ETCDIR)
+	install -m 755 $(BOOTPREP) $(DESTDIR)$(ETCDIR)/boot-prep.sh
 ifneq ($(MAN1PAGES),)
 	install -m 755 -d $(DESTDIR)$(MAN1DIR)
 	install -m 444 $(MAN1PAGES) $(DESTDIR)$(MAN1DIR)

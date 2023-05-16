@@ -170,6 +170,7 @@ struct wormhole_context {
 	/* PURPOSE_BOOT */
 	struct {
 		fsutil_mount_detail_t *mount_detail;
+		char *		prep_script;
 	} boot;
 
 	struct mount_farm *	farm;

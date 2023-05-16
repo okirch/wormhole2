@@ -819,6 +819,36 @@ identify_os(const char *root_dir)
 	return found;
 }
 
+static bool
+boot_run_prep_script(struct wormhole_context *ctx)
+{
+	char *argv[] = { ctx->boot.prep_script, NULL };
+	struct procutil_command cmd;
+	int status;
+	bool ok = false;
+
+	procutil_command_init(&cmd, argv);
+	procutil_command_setenv(&cmd, "WORMHOLE_ROOT", ctx->farm->chroot);
+
+	if (!procutil_command_run(&cmd, &status)) {
+		log_error("Failed to run boot prep script");
+		goto out;
+	}
+
+	if (!procutil_child_status_okay(status)) {
+		log_error("boot prep script %s: %s", ctx->boot.prep_script,
+				procutil_child_status_describe(status));
+		goto out;
+	}
+
+	log_debug("boot prep script %s: succeeded", ctx->boot.prep_script);
+	ok = true;
+
+out:
+	procutil_command_destroy(&cmd);
+	return ok;
+}
+
 static int
 __perform_boot(struct wormhole_context *ctx)
 {
@@ -898,6 +928,11 @@ __perform_boot(struct wormhole_context *ctx)
 	 || !ostree_attach_tmpfs(ostree, "/run")
 	 || !ostree_attach_readonly(ostree, "/run/udev"))
 		goto out;
+
+	if (ctx->boot.prep_script) {
+		if (!boot_run_prep_script(ctx))
+			goto out;
+	}
 
 	if (!wormhole_context_switch_root(ctx))
 		goto out;
@@ -1266,6 +1301,7 @@ enum {
 	OPT_INSTALL_BINDIR,
 	OPT_RPMDB,
 	OPT_LOGFILE,
+	OPT_BOOT_PREP_SCRIPT,
 };
 
 static struct option	long_options[] = {
@@ -1292,6 +1328,8 @@ static struct option	long_options[] = {
 	{ "install-bindir",
 			required_argument,	NULL,	OPT_INSTALL_BINDIR },
 	{ "logfile",	required_argument,	NULL,	OPT_LOGFILE	},
+	{ "boot-prep-script",
+			required_argument,	NULL,	OPT_BOOT_PREP_SCRIPT	},
 
 	{ NULL },
 };
@@ -1370,6 +1408,9 @@ main(int argc, char **argv)
 		case OPT_LOGFILE:
 			set_logfile(optarg);
 			break;
+
+		case OPT_BOOT_PREP_SCRIPT:
+			strutil_set(&ctx->boot.prep_script, optarg);
 
 		default:
 			log_error("Unknown option\n");
