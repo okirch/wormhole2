@@ -1,4 +1,11 @@
 
+ - transparent containers
+   * All system layers are "base" layers, and they are in fact podman containers
+   * wormhole-layer utility
+   	list [--system|--user]: show list of layer names
+	bind name: bind a single (system layer) container. Equivalent of "podman image mount" for now
+	update [--all|name]: Equivalent of podman pull
+
  - in boot mode, set SELinux context to unconfined
  - handle resolv.conf and other network related files
  - handle x-initrd.mounts and x-systemd.* options in fstab?
