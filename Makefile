@@ -51,6 +51,8 @@ LIBOWL_SRCS	= $(addprefix $(LIBOWL_SRCDIR)/,$(_LIBOWL_SRCS))
 LIBOWL_OBJS	= $(LIBOWL_SRCS:.c=.o)
 LIBOWL_SRCDIR	= owl
 
+SCRIPTS		= wormhole-image
+
 _MAN1PAGES	= wormhole.1 \
 		  wormhole-digger.1 \
 		  wormhole-autoprofile.1
@@ -73,6 +75,7 @@ install: $(WORMHOLE) $(IMGDELTA) $(DBUSRELAY)
 	install -m 555 -s $(WORMHOLE) $(DESTDIR)$(BINDIR)
 	install -m 555 -s $(IMGDELTA) $(DESTDIR)$(BINDIR)
 	install -m 555 -s $(DBUSRELAY) $(DESTDIR)$(BINDIR)
+	install -m 555 $(SCRIPTS) $(DESTDIR)$(BINDIR)
 	install -m 755 -d $(DESTDIR)$(ETCDIR)
 	install -m 755 $(BOOTPREP) $(DESTDIR)$(ETCDIR)/boot-prep.sh
 ifneq ($(MAN1PAGES),)

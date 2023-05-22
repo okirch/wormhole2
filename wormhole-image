@@ -1,0 +1,188 @@
+#!/bin/bash
+
+LAYER_BASEDIR=/var/lib/wormhole/images
+
+function usage() {
+
+	PROGNAME=$(basename $0)
+
+	cat <<-EOF >&2
+	Usage: $PROGNAME [list|bind|update] ....
+
+	list [--names]
+		Display list of base images configured
+	bind name
+		Mount the base image
+EOF
+	exit 1
+}
+
+function fatal() {
+
+	echo "Fatal: $@" >&2
+	exit 1
+}
+
+function wormhole_get_keyword {
+
+	local cfgfile keyword result
+
+	cfgfile="$LAYER_BASEDIR/$1/image.conf"
+	keyword="$2"
+	result=$(sed -e "/^${keyword}=/!d;s///" $cfgfile)
+	echo "$result"
+}
+
+function wormhole_get_image_name {
+
+	wormhole_get_keyword "$1" image
+}
+
+function wormhole_get_mount_point {
+
+	echo "$LAYER_BASEDIR/$1/root"
+}
+
+function wormhole_enumerate_images {
+
+	local name image_name
+
+	for name in $(ls $LAYER_BASEDIR 2>/dev/null); do
+		image_name=$(wormhole_get_image_name $name)
+		if [ -n "$image_name" ]; then
+			echo "$name" "$image_name"
+		fi
+	done
+}
+
+function wormhole_process_images {
+
+	local callback=$1
+
+	set -- $(wormhole_enumerate_images)
+	if [ $# -eq 0 ]; then
+		echo "No images found"
+		return
+	fi
+
+	while [ $# -gt 0 ]; do
+		$callback "$1" "$2"
+		shift 2
+	done
+}
+
+function list_format_default {
+
+	printf "%-15s %s\\n" "$@"
+}
+
+function list_format_names {
+
+	echo "$1"
+}
+
+function handle_list() {
+
+	list_format=list_format_default
+	if [ "$1" = "--names" ]; then
+		list_format=list_format_names
+		shift
+	fi
+
+	if [ $# -gt 0 ]; then
+		usage
+	fi
+
+	wormhole_process_images $list_format
+}
+
+function bind_image() {
+
+	local name=$1
+	local image_name=$2
+	local image_root image_mount
+
+	image_root=$(podman image mount "$image_name")
+	if [ -z "$image_root" ]; then
+		fatal "Unable to mount $image_name"
+	fi
+
+	image_mount=$(wormhole_get_mount_point "$name")
+	if [ -z "$image_mount" ]; then
+		fatal "No mount point for $name"
+	fi
+
+	if [ ! -d "$image_mount" ]; then
+		mkdir -p "$image_mount"
+	fi
+
+	if findmnt "$image_mount" >/dev/null 2>&1; then
+		echo "Remounting image $image_name"
+		umount -l "$image_mount"
+	else
+		echo "Mounting image $image_name"
+	fi
+
+	if ! mount -o bind "$image_root" "$image_mount"; then
+		fatal "Failed to bind mount image on $image_mount"
+	fi
+}
+
+function handle_bind() {
+
+	if [ $# -ne 1 ]; then
+		usage
+	fi
+
+	name="$1"
+
+	if [ "$name" = "all" ]; then
+		wormhole_process_images bind_image
+	else
+		image_name=$(wormhole_get_image_name $name)
+		if [ -z "$image_name" ]; then
+			fatal "Unknown image $name"
+		fi
+		bind_image $name $image_name
+	fi
+}
+
+function pull_image() {
+
+	local name=$1
+	local image_name=$2
+
+	podman pull "$image_name"
+}
+
+function handle_update() {
+
+	if [ $# -ne 1 ]; then
+		usage
+	fi
+
+	name="$1"
+
+	if [ "$name" = "all" ]; then
+		wormhole_process_images pull_image
+	else
+		image_name=$(wormhole_get_image_name $name)
+		if [ -z "$image_name" ]; then
+			fatal "Unknown image $name"
+		fi
+		pull_image $name $image_name
+	fi
+}
+
+cmd="$1"; shift
+
+case $cmd in
+list)
+	handle_list "$@";;
+bind)
+	handle_bind "$@";;
+update)
+	handle_update "$@";;
+*)
+	usage;;
+esac
