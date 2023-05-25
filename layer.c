@@ -290,6 +290,9 @@ wormhole_layer_load_config(struct wormhole_layer *layer)
 		if (!strcmp(kwd, "is-root")) {
 			okay = __parse_boolean(layer->config_path, line, value, &layer->is_root);
 		} else
+		if (!strcmp(kwd, "image-root")) {
+			strutil_set(&layer->image_path, value);
+		} else
 		if (!strcmp(kwd, "use-layer")) {
 			strutil_array_append(&layer->used, value);
 		} else
