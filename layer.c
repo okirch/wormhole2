@@ -514,10 +514,10 @@ __wormhole_layers_resolve(struct wormhole_layer_array *layers, const char *name,
 
 	layer = wormhole_layer_new(name, NULL, depth);
 
-	if (remount_image_base && !wormhole_layer_remount_image(layer, remount_image_base))
+	if (!wormhole_layer_load_config(layer))
 		goto failed;
 
-	if (!wormhole_layer_load_config(layer))
+	if (remount_image_base && !wormhole_layer_remount_image(layer, remount_image_base))
 		goto failed;
 
 	/* Now resolve the lower layers referenced by this one */
