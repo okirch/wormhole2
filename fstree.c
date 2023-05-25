@@ -392,6 +392,11 @@ __fstree_node_mount_bind(const struct fstree_node *node)
 	if (node->bind_mount_override_layer)
 		bind_source = __pathutil_concat2(node->bind_mount_override_layer->image_path, bind_source);
 
+	if (access(bind_source, X_OK) < 0) {
+		trace("Silently ignoring system mount %s (%m)", bind_source);
+		return true;
+	}
+
 	trace("Bind mounting %s on %s\n", bind_source, node->relative_path);
 	if (!fsutil_isdir(bind_source)
 	 && fsutil_isdir(node->mount.mount_point)) {
