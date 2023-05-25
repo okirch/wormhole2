@@ -135,6 +135,8 @@ system_mount_tree_discover_transparent(void)
 	fstree_hide_pattern(fstree, "/boot");
 	fstree_hide_pattern(fstree, "/.snapshots");
 	fstree_hide_pattern(fstree, "/var/lib/overlay");
+	fstree_hide_pattern(fstree, "/var/lib/containers");
+	fstree_hide_pattern(fstree, "/var/lib/wormhole");
 
 	return fstree;
 }
