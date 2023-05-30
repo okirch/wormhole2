@@ -398,11 +398,22 @@ __fstree_node_mount_bind(const struct fstree_node *node)
 	}
 
 	trace("Bind mounting %s on %s\n", bind_source, node->relative_path);
-	if (!fsutil_isdir(bind_source)
-	 && fsutil_isdir(node->mount.mount_point)) {
-		trace("  Need to change %s from dir to file", node->mount.mount_point);
-		rmdir(node->mount.mount_point);
-		fsutil_makefile(node->mount.mount_point, 0644);
+	switch (fsutil_get_dtype(bind_source)) {
+	case DT_DIR:
+		/* The mount point should be a dir already */
+		break;
+
+	case DT_LNK:
+		/* leave symlinks alone */
+		return true;
+
+	default:
+		if (fsutil_isdir(node->mount.mount_point)) {
+			trace("  Need to change %s from dir to file", node->mount.mount_point);
+			rmdir(node->mount.mount_point);
+			fsutil_makefile(node->mount.mount_point, 0644);
+		}
+		break;
 	}
 	return fsutil_mount_bind(bind_source, node->mount.mount_point, true);
 }
@@ -576,9 +587,13 @@ fstree_node_traverse(struct fstree_node *node, bool (*visitorfn)(const struct fs
 const char *
 mount_export_type_as_string(int export_type)
 {
+	static char unknown[32];
+
 	switch (export_type) {
 	case WORMHOLE_EXPORT_ROOT:
 		return "root";
+	case WORMHOLE_EXPORT_AS_IS:
+		return "as-is";
 	case WORMHOLE_EXPORT_NONE:
 		return "none";
 	case WORMHOLE_EXPORT_STACKED:
@@ -595,7 +610,8 @@ mount_export_type_as_string(int export_type)
 		return "error";
 	}
 
-	return "unknown";
+	snprintf(unknown, sizeof(unknown), "unknown (%u)", export_type);
+	return unknown;
 }
 
 bool

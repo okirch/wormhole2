@@ -538,17 +538,14 @@ update_image_work(struct imgdelta_config *cfg, const char *tpath)
 		}
 		strutil_array_append(&cfg->layer_images, empty);
 	} else {
-		struct wormhole_layer_array resolved = { 0 };
 		/* FIXME: remount layers to shorten the path names? */
-		const char *remount_image_base = NULL; 
-
-		if (!wormhole_layers_resolve(&resolved, &cfg->layers_used, remount_image_base))
+		if (!wormhole_layers_resolve(&cfg->layers))
 			return 1;
 
-		for (i = 0; i < resolved.count; ++i)
-			strutil_array_append(&cfg->layer_images, resolved.data[i]->image_path);
+		for (i = 0; i < cfg->layers.array.count; ++i)
+			strutil_array_append(&cfg->layer_images, cfg->layers.array.data[i]->image_path);
 
-		wormhole_layer_array_destroy(&resolved);
+		wormhole_layer_array_destroy(&cfg->layers.array);
 	}
 
 	lowerspec = strutil_array_join(&cfg->layer_images, ":");
@@ -731,7 +728,7 @@ __update_layer_config(struct wormhole_layer *layer, struct imgdelta_config *cfg)
 
 	layer->is_root = cfg->create_base_layer;
 	if (!cfg->create_base_layer)
-		strutil_array_append_array(&layer->used, &cfg->layers_used);
+		strutil_array_append_array(&layer->used, &cfg->layers.names);
 
 	if (!(farm = create_mount_farm_for_layer(layer, cfg)))
 		return false;
@@ -945,7 +942,7 @@ main(int argc, char **argv)
 			break;
 
 		case 'L':
-			strutil_array_append(&config.layers_used, optarg);
+			strutil_array_append(&config.layers.names, optarg);
 			break;
 
 		case 'I':
@@ -1014,8 +1011,8 @@ main(int argc, char **argv)
 		if (config.create_base_layer)
 			trace("  (creating base layer)");
 		else
-			for (i = 0; i < config.layers_used.count; ++i)
-				trace("  %s", config.layers_used.data[i]);
+			for (i = 0; i < config.layers.names.count; ++i)
+				trace("  %s", config.layers.names.data[i]);
 
 		trace("Dirs to copy");
 		for (i = 0; i < config.mounts.count; ++i) {
@@ -1036,11 +1033,11 @@ main(int argc, char **argv)
 			trace("  %s", config.entry_points.data[i]);
 	}
 
-	if (config.layers_used.count == 0 && !config.create_base_layer) {
+	if (config.layers.names.count == 0 && !config.create_base_layer) {
 		log_error("No lower layers specified (if you want to create a base layer, explicitly use --create-base-layer)");
 		return 1;
 	}
-	if (config.layers_used.count != 0 && config.create_base_layer) {
+	if (config.layers.names.count != 0 && config.create_base_layer) {
 		log_error("You want me to create a base layer, but specified lower layers");
 		return 1;
 	}

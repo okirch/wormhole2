@@ -199,6 +199,28 @@ pathutil_expand(const char *orig_path, bool quiet)
 }
 
 bool
+pathutil_check_prefix(const char *path, const char *prefix)
+{
+	int plen = strlen(prefix);
+
+	return !strncmp(path, prefix, plen)
+	    && (path[plen] == '\0' || path[plen] == '/');
+}
+
+bool
+pathutil_check_prefix_list(const char *path, const char *prefixes[])
+{
+	const char *prefix;
+
+	while ((prefix = *prefixes++) != NULL) {
+		if (pathutil_check_prefix(path, prefix))
+			return true;
+	}
+
+	return false;
+}
+
+bool
 strutil_string_in_list(const char *needle, const char **haystack)
 {
 	const char *straw;

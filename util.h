@@ -45,6 +45,7 @@ extern const char *		pathutil_dirname(const char *path);
 extern char *			pathutil_sanitize(const char *path);
 extern void			pathutil_concat2(char **path_p, const char *parent, const char *name);
 extern char *			pathutil_expand(const char *orig_path, bool quiet);
+extern bool			pathutil_check_prefix_list(const char *path, const char *prefixes[]);
 
 struct procutil_command {
 	const char *		root_directory;

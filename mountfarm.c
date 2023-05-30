@@ -275,6 +275,18 @@ mount_farm_set_upper_base(struct mount_farm *farm, const char *upper_base)
 	return farm->upper_base && farm->work_base;
 }
 
+bool
+mount_farm_use_system_root(struct mount_farm *farm)
+{
+	if (farm->tree)
+		fstree_free(farm->tree);
+
+	farm->tree = fstree_new(NULL);
+	farm->tree->root->export_type = WORMHOLE_EXPORT_AS_IS;
+
+	return true;
+}
+
 struct fstree_node *
 mount_farm_find_leaf(struct mount_farm *farm, const char *relative_path)
 {
@@ -349,7 +361,7 @@ __mount_farm_fudge_non_directory(struct fstree_node *node, struct fstree_node *c
 static bool
 __mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_ancestor)
 {
-	struct fstree_node *child;
+	struct fstree_node *child, **child_pos;
 	unsigned int i;
 
 	trace3("%*.*s%s(%s [%s:%s])",
@@ -389,12 +401,26 @@ __mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_anc
 
 	switch ((closest_ancestor->export_type << 8) | node->export_type) {
 	case EXPORT_COMBINATION(ROOT, ROOT):
+	case EXPORT_COMBINATION(AS_IS, AS_IS):
 		/* the root node itself */
 		break;
 
 	case EXPORT_COMBINATION(ROOT, NONE):
+	case EXPORT_COMBINATION(AS_IS, NONE):
 		/* Internal node directly below the root. Mark it as a root node as well */
-		node->export_type = WORMHOLE_EXPORT_ROOT;
+		node->export_type = closest_ancestor->export_type;
+		break;
+
+	case EXPORT_COMBINATION(AS_IS, TRANSPARENT):
+		/* If we're using the system root as-is, trying to re-mount a directory onto
+		 * itself makes no sense. */
+		if (strutil_equal(node->full_path, node->relative_path)) {
+			trace3("%*.*s - %s will be used as-is",
+					node->depth, node->depth, "",
+					node->relative_path);
+			fstree_node_reset(node);
+			node->export_type = WORMHOLE_EXPORT_AS_IS;
+		}
 		break;
 
 	case EXPORT_COMBINATION(ROOT, TRANSPARENT):
@@ -439,6 +465,11 @@ __mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_anc
 		fstree_node_invalidate(node);
 		break;
 
+	case EXPORT_COMBINATION(AS_IS, HIDE):
+		/* FIXME: when hiding a directory that is a child of another dir that is used
+		 * as-is, we should really reconfigure to mount an empty directory over it. */
+		/* Maybe address this in the mount code. */
+
 	default:
 		if (node->export_type != WORMHOLE_EXPORT_NONE) {
 			log_error("%s: unsupported export type combination %s inside %s", 
@@ -458,9 +489,21 @@ __mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_anc
 		return false;
 	}
 
-	for (child = node->children; child != NULL; child = child->next) {
+	for (child_pos = &node->children; (child = *child_pos) != NULL; ) {
 		if (!__mount_farm_percolate(child, closest_ancestor))
 			return false;
+
+		/* If this is a system mount point that we use as-is, and the node
+		 * has zero children, we might as well prune it. */
+		if (child->export_type == WORMHOLE_EXPORT_AS_IS && child->children == NULL) {
+			trace3("%*.*s - pruning empty as-is node %s",
+					child->depth, child->depth, "",
+					child->relative_path);
+			*child_pos = child->next;
+			fstree_node_free(child);
+		} else {
+			child_pos = &child->next;
+		}
 	}
 
 	return true;

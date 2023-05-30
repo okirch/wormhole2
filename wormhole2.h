@@ -37,6 +37,7 @@ struct fstree {
 enum {
 	WORMHOLE_EXPORT_ERROR = -1,
 	WORMHOLE_EXPORT_NONE,
+	WORMHOLE_EXPORT_AS_IS,
 	WORMHOLE_EXPORT_ROOT,
 	WORMHOLE_EXPORT_STACKED,
 	WORMHOLE_EXPORT_TRANSPARENT,
@@ -73,7 +74,7 @@ struct fstree_node {
 
 	mount_ops_t *	mount_ops;
 
-	fsutil_mount_req_t	mount;
+	fsutil_mount_req_t mount;
 
 	struct wormhole_layer *bind_mount_override_layer;
 	struct wormhole_layer_array attached_layers;
@@ -139,6 +140,14 @@ enum {
 	__LAYER_TYPE_MAX
 };
 
+struct wormhole_layer_config {
+	/* This is where we remount the $layer/image directories to shorten the path names */
+	char *			remount_image_base;
+	bool			use_system_root;
+	struct strutil_array	names;
+	struct wormhole_layer_array array;
+};
+
 struct wormhole_context {
 	unsigned int		purpose;
 	int			exit_status;
@@ -148,13 +157,10 @@ struct wormhole_context {
 
 	char *			workspace;
 
-	/* This is where we remount the $layer/image directories to shorten the path names */
-	char *			image_path;
 
 	struct procutil_command	command;
 
-	struct strutil_array	layer_names;
-	struct wormhole_layer_array layers;
+	struct wormhole_layer_config layer;
 
 	/* PURPOSE_BUILD */
 	struct {
@@ -180,6 +186,7 @@ struct wormhole_context {
 	bool			map_caller_to_root;
 	bool			use_privileged_namespace;
 	bool			running_inside_chroot;
+	bool			no_switch_root;
 	bool			auto_entry_points;
 	bool			force;
 	bool			no_selinux;
@@ -224,6 +231,7 @@ extern struct mount_farm *	mount_farm_new(int purpose, const char *farm_root);
 extern void			mount_farm_free(struct mount_farm *farm);
 extern bool			mount_farm_create_workspace(struct mount_farm *farm);
 extern bool			mount_farm_set_upper_base(struct mount_farm *farm, const char *upper_base);
+extern bool			mount_farm_use_system_root(struct mount_farm *farm);
 extern struct fstree_node *	mount_farm_find_leaf(struct mount_farm *farm, const char *relative_path);
 extern bool			mount_farm_mount_all(struct mount_farm *farm);
 extern struct fstree_node *	mount_farm_add_system_dir(struct mount_farm *farm, const char *system_path);
@@ -261,6 +269,8 @@ fstree_node_fstype(const struct fstree_node *node)
 	return node->mount_ops? node->mount_ops->name : NULL;
 }
 
+extern void			wormhole_layer_config_destroy(struct wormhole_layer_config *);
+extern bool			wormhole_layer_config_use_system_root(const struct wormhole_layer_config *);
 extern void			wormhole_layer_set_default_search_path(void);
 extern void			wormhole_layer_print_default_search_path(void);
 extern struct wormhole_layer *	wormhole_layer_new(const char *name, const char *path, unsigned int depth);
@@ -281,8 +291,11 @@ extern struct wormhole_layer *	wormhole_layer_get_system(void);
 
 extern bool			wormhole_layer_update_from_mount_farm(struct wormhole_layer *layer, const struct fstree_node *tree);
 extern bool			wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm *farm);
-extern bool			wormhole_layers_resolve(struct wormhole_layer_array *layers, const struct strutil_array *names, const char *remount_image_base);
+extern bool			wormhole_layers_resolve(struct wormhole_layer_config *layers);
+extern bool			wormhole_layers_remount(struct wormhole_layer_config *layers);
 extern bool			wormhole_layer_copyup_directories(const struct wormhole_layer *layer, const char *upperdir,
 					struct strutil_array *dir_list);
+
+extern struct wormhole_layer *	__wormhole_layer_new(const char *name);
 
 #endif /* WORMHOLE2_H */
