@@ -293,7 +293,7 @@ fstree_node_zap_dirs(struct fstree_node *node)
 
 	while (i--) {
 		const char *dir = to_zap[i];
-		if (rmdir(dir) < 0 && errno != ENOENT) {
+		if (rmdir(dir) < 0 && errno != ENOENT && errno != ENOTEMPTY) {
 			if (errno != ENOTDIR || unlink(dir) < 0) {
 				log_error("cannot remove %s: %m", dir);
 				return false;
