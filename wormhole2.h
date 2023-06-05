@@ -195,6 +195,7 @@ struct wormhole_context {
 	bool			auto_entry_points;
 	bool			force;
 	bool			no_selinux;
+	bool			remount_layers;
 
 	struct fsutil_tempdir	temp;
 };

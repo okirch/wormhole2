@@ -378,6 +378,10 @@ wormhole_context_new(void)
 	/* The default for building new layers is to auto-discover new entry points. */
 	ctx->auto_entry_points = true;
 
+	/* By default, we will try to remount layer in order to shorten the path names
+	 * that go into the overlay mount options. */
+	ctx->remount_layers = true;
+
 	ctx->working_directory = get_current_dir_name();
 
 	fsutil_tempdir_init(&ctx->temp);
@@ -553,7 +557,7 @@ wormhole_context_mount_tree(struct wormhole_context *ctx)
 }
 
 static bool
-prepare_tree_for_building(struct wormhole_context *ctx, bool remount_layers)
+prepare_tree_for_building(struct wormhole_context *ctx)
 {
 	struct mount_farm *farm = ctx->farm;
 
@@ -566,7 +570,7 @@ prepare_tree_for_building(struct wormhole_context *ctx, bool remount_layers)
 	if (!wormhole_context_resolve_layers(ctx))
 		return false;
 
-	if (remount_layers && !wormhole_context_remount_layers(ctx))
+	if (ctx->remount_layers && !wormhole_context_remount_layers(ctx))
 		return false;
 
 	if (!wormhole_context_define_mount_tree(ctx))
@@ -598,8 +602,6 @@ prepare_tree_for_building(struct wormhole_context *ctx, bool remount_layers)
 static bool
 prepare_tree_for_use(struct wormhole_context *ctx)
 {
-	bool remount_layers = true;
-
 	if (!wormhole_context_resolve_layers(ctx))
 		return false;
 
@@ -613,10 +615,10 @@ prepare_tree_for_use(struct wormhole_context *ctx)
 		ctx->no_switch_root = true;
 
 		/* Do not bother with trying to remount any layers */
-		remount_layers = false;
+		ctx->remount_layers = false;
 	}
 
-	if (remount_layers && !wormhole_context_remount_layers(ctx))
+	if (ctx->remount_layers && !wormhole_context_remount_layers(ctx))
 		return false;
 
 	if (!wormhole_context_define_mount_tree(ctx))
@@ -932,7 +934,8 @@ prune_new_image(struct wormhole_context *ctx)
 	struct fstree_iter *it;
 	struct fstree_node *node;
 
-	if (!prepare_tree_for_building(ctx, false))
+	ctx->remount_layers = false;
+	if (!prepare_tree_for_building(ctx))
 		return false;
 
 	pathutil_concat2(&image_root, ctx->build.root, "image");
@@ -991,7 +994,7 @@ __perform_build(struct wormhole_context *ctx)
 	if (!wormhole_context_detach(ctx))
 		goto out;
 
-	if (!prepare_tree_for_building(ctx, true)
+	if (!prepare_tree_for_building(ctx)
 	 || !wormhole_context_mount_tree(ctx))
 		goto out;
 
