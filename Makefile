@@ -32,6 +32,7 @@ DBUSRELAY_OBJS	= $(DBUSRELAY_SRCS:.c=.o)
 LIBWORMHOLE	= libwormhole.a
 LIBWH_SRCS	= \
 		  layer.c \
+		  discovery.c \
 		  mountfarm.c \
 		  fstree.c \
 		  mntent2.c \

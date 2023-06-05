@@ -252,6 +252,9 @@ extern struct fstree_node *	mount_farm_add_virtual_mount(struct mount_farm *farm
 extern bool			mount_farm_mount_into(struct mount_farm *farm, const char *src, const char *dst);
 extern void			mount_farm_print_tree(struct mount_farm *farm);
 
+/* discovery code */
+extern struct fstree *		system_mount_tree_discover(int base_layer, int purpose);
+
 extern void			fstree_node_free(struct fstree_node *leaf);
 extern struct fstree_node *	fstree_node_new(const char *name, const char *relative_path, const struct fsroot *root);
 extern bool			fstree_node_is_mountpoint(const struct fstree_node *leaf);

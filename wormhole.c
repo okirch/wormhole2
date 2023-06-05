@@ -40,197 +40,6 @@
 #define BIND_SYSTEM_OVERLAYS	true
 
 static bool
-system_mount_tree_maybe_add_transparent(struct fstree *fstree, const fsutil_mount_cursor_t *cursor)
-{
-	fsutil_mount_detail_t *md = cursor->detail;
-	struct fstree_node *node;
-	int dtype;
-
-	if (!strcmp(cursor->mountpoint, "/"))
-		return true;
-
-	if (md->fstype == NULL) {
-		trace("system mount %s has null fstype", cursor->mountpoint);
-		return false;
-	}
-
-	/* For the time being, ignore autofs mounts */
-	if (!strcmp(md->fstype, "autofs"))
-		return true;
-
-	dtype = fsutil_get_dtype(cursor->mountpoint);
-
-	if (strcmp(md->fstype, "overlay") || BIND_SYSTEM_OVERLAYS) {
-		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_TRANSPARENT, dtype, NULL, 0);
-	} else {
-		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_STACKED, dtype, NULL, 0);
-		if (node && cursor->overlay.dirs->count) {
-			struct wormhole_layer *l;
-			unsigned int j;
-
-			if (cursor->overlay.dirs->count == 0) {
-				log_error("system mount %s is an overlay, but we didn't detect any layers",
-						cursor->mountpoint);
-				return false;
-			}
-
-			l = __wormhole_layer_new("system-layer");
-
-			for (j = 0; j < cursor->overlay.dirs->count; ++j) {
-				const char *overlay_path = cursor->overlay.dirs->data[j];
-
-				mount_config_array_add(&l->mounts, overlay_path, DT_DIR,
-						MOUNT_ORIGIN_LAYER, MOUNT_MODE_OVERLAY);
-			}
-
-			wormhole_layer_array_append(&node->attached_layers, l);
-			node->mount_ops = &mount_ops_overlay;
-			return true;
-		}
-	}
-
-	if (node == NULL) {
-		log_error("failed to add node for system mount %s\n", cursor->mountpoint);
-		return false;
-	}
-
-	if (node->mount.detail) {
-		/* It's a setup problem for the system, but not a problem for us as we just bind mount
-		 * what's there. */
-		log_warning("%s: duplicate system mount (%s and %s)", cursor->mountpoint, node->mount.detail->fstype, md->fstype);
-		return false;
-	}
-
-	node->mount.detail = fsutil_mount_detail_hold(md);
-	node->mount_ops = &mount_ops_bind;
-
-	return true;
-}
-
-static bool
-system_mount_tree_maybe_add_overlay(struct fstree *fstree, const fsutil_mount_cursor_t *cursor)
-{
-	static const char *protected_dirs[] = {
-		"/usr",
-		"/lib",
-		"/lib64",
-		"/bin",
-		"/sbin",
-
-		NULL
-	};
-	fsutil_mount_detail_t *md = cursor->detail;
-	struct fstree_node *node;
-	int dtype;
-
-	trace("checking %s", cursor->mountpoint);
-	if (md->fstype == NULL) {
-		trace("system mount %s has null fstype", cursor->mountpoint);
-		return false;
-	}
-
-	/* For the time being, ignore autofs mounts */
-	if (!strcmp(md->fstype, "autofs"))
-		return true;
-
-	dtype = fsutil_get_dtype(cursor->mountpoint);
-
-	if (!strutil_equal(cursor->mountpoint, "/")
-	 && !pathutil_check_prefix_list(cursor->mountpoint, protected_dirs)) {
-		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_TRANSPARENT, dtype, NULL, 0);
-		node->mount.detail = fsutil_mount_detail_hold(md);
-		node->mount_ops = &mount_ops_bind;
-		return true;
-	}
-
-	/* We're unable to handle regular file mounts for now */
-	if (dtype == DT_DIR) {
-		struct wormhole_layer *l;
-
-		trace("TURNING %s into overlay", cursor->mountpoint);
-		node = fstree_add_export(fstree, cursor->mountpoint, WORMHOLE_EXPORT_STACKED, dtype, NULL, 0);
-		if (node == NULL) {
-			log_error("failed to add node for system mount %s\n", cursor->mountpoint);
-			return false;
-		}
-		trace("%s  %u", node->relative_path, node->export_type);
-
-		l = __wormhole_layer_new("system-layer");
-		mount_config_array_add(&l->mounts, cursor->mountpoint, dtype,
-				MOUNT_ORIGIN_LAYER, MOUNT_MODE_OVERLAY);
-
-		wormhole_layer_array_append(&node->attached_layers, l);
-		node->mount_ops = &mount_ops_overlay;
-	}
-
-	return true;
-}
-
-static struct fstree *
-system_mount_tree_discover_transparent(void)
-{
-	fsutil_mount_iterator_t *it;
-	fsutil_mount_cursor_t cursor;
-	struct fstree *fstree;
-
-	if (!(it = fsutil_mount_iterator_create(NULL, FSUTIL_MTAB_ITERATOR, NULL)))
-		return NULL;
-
-	fstree = fstree_new(NULL);
-
-	while (fsutil_mount_iterator_next(it, &cursor))
-		system_mount_tree_maybe_add_transparent(fstree, &cursor);
-
-	fsutil_mount_iterator_free(it);
-
-	fstree->root->export_type = WORMHOLE_EXPORT_ROOT;
-
-	fstree_hide_pattern(fstree, "/tmp/*");
-	fstree_hide_pattern(fstree, "/usr");
-	fstree_hide_pattern(fstree, "/lib");
-	fstree_hide_pattern(fstree, "/lib64");
-	fstree_hide_pattern(fstree, "/bin");
-	fstree_hide_pattern(fstree, "/sbin");
-	fstree_hide_pattern(fstree, "/boot");
-	fstree_hide_pattern(fstree, "/.snapshots");
-	fstree_hide_pattern(fstree, "/var/lib/overlay");
-	fstree_hide_pattern(fstree, "/var/lib/containers");
-	fstree_hide_pattern(fstree, "/var/lib/wormhole");
-
-	return fstree;
-}
-
-static struct fstree *
-system_mount_tree_discover_overlay(void)
-{
-	fsutil_mount_iterator_t *it;
-	fsutil_mount_cursor_t cursor;
-	struct fstree *fstree;
-
-	if (!(it = fsutil_mount_iterator_create(NULL, FSUTIL_MTAB_ITERATOR, NULL)))
-		return NULL;
-
-	fstree = fstree_new(NULL);
-
-	while (fsutil_mount_iterator_next(it, &cursor))
-		system_mount_tree_maybe_add_overlay(fstree, &cursor);
-
-	fsutil_mount_iterator_free(it);
-
-	if (fstree->root->export_type == WORMHOLE_EXPORT_NONE)
-		fstree->root->export_type = WORMHOLE_EXPORT_ROOT;
-
-	fstree_hide_pattern(fstree, "/tmp/*");
-	fstree_hide_pattern(fstree, "/boot");
-	fstree_hide_pattern(fstree, "/.snapshots");
-	fstree_hide_pattern(fstree, "/var/lib/overlay");
-	fstree_hide_pattern(fstree, "/var/lib/containers");
-	fstree_hide_pattern(fstree, "/var/lib/wormhole");
-
-	return fstree;
-}
-
-static bool
 system_mount_tree_discover_boot(struct fstree *fstree)
 {
 	const char *root_dir = fstree->root_location->path;
@@ -308,6 +117,15 @@ system_mount_tree_discover_boot(struct fstree *fstree)
 	return true;
 }
 
+static inline void
+cannot_change_mount(struct fstree_node *node)
+{
+	trace("cannot change %s mount for %s (%s) - replaced by platform",
+			node->mount_ops? node->mount_ops->name : "unspecific",
+			node->relative_path,
+			node->mount.detail? node->mount.detail->fstype : "unknown fstype");
+}
+
 static bool
 mount_farm_apply_layer(struct mount_farm *farm, struct wormhole_layer *layer)
 {
@@ -315,70 +133,13 @@ mount_farm_apply_layer(struct mount_farm *farm, struct wormhole_layer *layer)
 }
 
 static bool
-mount_farm_discover_system_mounts_transparent(struct mount_farm *farm)
+mount_farm_merge_system_mounts(struct mount_farm *farm, struct fstree *fstree)
 {
-	struct fstree *fstree = NULL;
 	struct fstree_iter *it;
 	struct fstree_node *node;
 	bool okay = false;
-
-	trace("Discovering system mounts");
-
-	if (!(fstree = system_mount_tree_discover_transparent())) {
-		log_error("Mount state discovery failed\n");
-		return false;
-	}
-
-	it = fstree_iterator_new(fstree, false);
-	while ((node = fstree_iterator_next(it)) != NULL) {
-		struct fstree_node *new_mount;
-
-		/* Just an internal tree node, not a mount */
-		if (node->export_type == WORMHOLE_EXPORT_ROOT
-		 || node->export_type == WORMHOLE_EXPORT_NONE)
-			continue;
-
-		new_mount = fstree_add_export(farm->tree, node->relative_path, node->export_type, node->dtype, NULL, FSTREE_QUIET);
-		if (new_mount == NULL) {
-			trace("overriding system mount for %s (%s) - replaced by platform", node->relative_path,
-					node->mount.detail? node->mount.detail->fstype : "unknown fstype");
-			continue;
-		}
-
-		trace("created new system mount for %s (%s)", node->relative_path, fstree_node_fstype(node));
-		if (node->export_type != WORMHOLE_EXPORT_HIDE) {
-			fstree_node_set_fstype(new_mount, node->mount_ops, farm);
-			new_mount->mount.detail = fsutil_mount_detail_hold(node->mount.detail);
-		}
-	}
-
-	okay = true;
-
-	if (!okay)
-		log_error("System mount discovery failed");
-
-	fstree_iterator_free(it);
-	fstree_free(fstree);
-	return okay;
-}
-
-static bool
-mount_farm_discover_system_mounts_overlay(struct mount_farm *farm)
-{
-	struct fstree *fstree = NULL;
-	struct fstree_iter *it;
-	struct fstree_node *node;
-	bool okay = false;
-
-	trace("Discovering system mounts");
-
-	if (!(fstree = system_mount_tree_discover_overlay())) {
-		log_error("Mount state discovery failed\n");
-		return false;
-	}
 
 	node = fstree->root;
-	trace("Root %s type %u", node->relative_path, node->export_type);
 
 	it = fstree_iterator_new(fstree, false);
 	while ((node = fstree_iterator_next(it)) != NULL) {
@@ -394,8 +155,7 @@ mount_farm_discover_system_mounts_overlay(struct mount_farm *farm)
 
 		new_mount = fstree_add_export(farm->tree, node->relative_path, node->export_type, node->dtype, NULL, FSTREE_QUIET);
 		if (new_mount == NULL) {
-			trace("overriding system mount for %s (%s) - replaced by platform", node->relative_path,
-					node->mount.detail? node->mount.detail->fstype : "unknown fstype");
+			cannot_change_mount(node);
 			continue;
 		}
 
@@ -403,6 +163,16 @@ mount_farm_discover_system_mounts_overlay(struct mount_farm *farm)
 		if (node->export_type != WORMHOLE_EXPORT_HIDE) {
 			fstree_node_set_fstype(new_mount, node->mount_ops, farm);
 			new_mount->mount.detail = fsutil_mount_detail_hold(node->mount.detail);
+
+			if (node->attached_layers.count) {
+				unsigned int i;
+
+				for (i = 0; i < node->attached_layers.count; ++i) {
+					struct wormhole_layer *l = node->attached_layers.data[i];
+
+					wormhole_layer_array_append(&new_mount->attached_layers, l);
+				}
+			}
 		}
 	}
 
@@ -412,7 +182,6 @@ mount_farm_discover_system_mounts_overlay(struct mount_farm *farm)
 		log_error("System mount discovery failed");
 
 	fstree_iterator_free(it);
-	fstree_free(fstree);
 	return okay;
 }
 
@@ -474,7 +243,8 @@ wormhole_context_define_mount_tree(struct wormhole_context *ctx)
 {
 	struct wormhole_layer_array *layers = &ctx->layer.array;
 	struct mount_farm *farm = ctx->farm;
-	bool okay = false, handled_system_mounts = false;
+	struct fstree *fstree = NULL;
+	bool okay = false;
 	unsigned int i;
 
 	trace("Applying layers");
@@ -485,18 +255,18 @@ wormhole_context_define_mount_tree(struct wormhole_context *ctx)
 			goto out;
 	}
 
-	if (wormhole_layer_config_use_system_root(&ctx->layer)) {
-		if (ctx->purpose == PURPOSE_BUILD) {
-			trace("BUILD WITH OVERLAYS");
-			if (!mount_farm_discover_system_mounts_overlay(farm))
-				goto out;
-			handled_system_mounts = true;
-		}
+	trace("Discovering system mounts");
+	fstree = system_mount_tree_discover(wormhole_layer_config_base_layer_type(&ctx->layer), ctx->purpose);
+	if (fstree == NULL) {
+		log_error("Mount state discovery failed\n");
+		goto out;
 	}
 
-	if (!handled_system_mounts
-	 && !mount_farm_discover_system_mounts_transparent(farm))
+	if (!mount_farm_merge_system_mounts(farm, fstree))
 		goto out;
+
+	if (farm->tree->root->export_type == WORMHOLE_EXPORT_NONE)
+		farm->tree->root->export_type = WORMHOLE_EXPORT_ROOT;
 
 	if (mount_farm_apply_quirks(farm)
 	 && mount_farm_percolate(farm)
@@ -505,6 +275,8 @@ wormhole_context_define_mount_tree(struct wormhole_context *ctx)
 	}
 
 out:
+	if (fstree)
+		fstree_free(fstree);
 	return okay;
 }
 
