@@ -707,6 +707,10 @@ wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm 
 
 		if (!(new_mount = mount_farm_add_mount(farm, mnt, layer)))
 			return false;
+
+		/* This does not really belong here, but it does the job for now */
+		if (new_mount->export_type == WORMHOLE_EXPORT_STACKED)
+			new_mount->export_flags |= FSTREE_NODE_F_TRACK;
 	}
 
 	return true;
