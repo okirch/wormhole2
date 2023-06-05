@@ -293,6 +293,26 @@ static struct wormhole_attachment_rule host_build_rules[] = {
 };
 
 static struct wormhole_attachment_rule host_use_rules[] = {
+	WORMHOLE_ATTACHMENT_CHECK_FSTYPE("autofs", skip),
+
+	WORMHOLE_ATTACHMENT_CHECK_PATH("/", track_changes),
+	WORMHOLE_ATTACHMENT_CHECK_PREFIX("/usr", track_changes),
+	WORMHOLE_ATTACHMENT_CHECK_PREFIX("/lib", track_changes),
+	WORMHOLE_ATTACHMENT_CHECK_PREFIX("/lib64", track_changes),
+	WORMHOLE_ATTACHMENT_CHECK_PREFIX("/bin", track_changes),
+	WORMHOLE_ATTACHMENT_CHECK_PREFIX("/sbin", track_changes),
+	WORMHOLE_ATTACHMENT_CHECK_PREFIX("/etc", track_changes),
+	WORMHOLE_ATTACHMENT_CHECK_PREFIX("/opt", track_changes),
+
+	WORMHOLE_ATTACHMENT_CHECK_PREFIX("/boot", skip),
+	WORMHOLE_ATTACHMENT_CHECK_PREFIX("/.snapshots", skip),
+	WORMHOLE_ATTACHMENT_CHECK_PREFIX("/var/lib/overlay", skip),
+	WORMHOLE_ATTACHMENT_CHECK_PREFIX("/var/lib/containers", skip),
+	WORMHOLE_ATTACHMENT_CHECK_PREFIX("/var/lib/wormhole", skip),
+	WORMHOLE_ATTACHMENT_CHECK_GLOB("/tmp/*", skip),
+
+	WORMHOLE_ATTACHMENT_DEFAULT(bind),
+
 	{ NULL }
 };
 
@@ -362,7 +382,6 @@ system_mount_tree_discover(int base_layer, int purpose)
 	case SMTD_COMBINE(WORMHOLE_BASE_LAYER_HOST, PURPOSE_BUILD):
 		return system_mount_tree_discover_rules(host_build_rules);
 	case SMTD_COMBINE(WORMHOLE_BASE_LAYER_HOST, PURPOSE_USE):
-		/* Maybe it'd be enough to just return an empty fstree here. */
 		return system_mount_tree_discover_rules(host_use_rules);
 	case SMTD_COMBINE(WORMHOLE_BASE_LAYER_CONTAINER, PURPOSE_USE):
 		return system_mount_tree_discover_rules(container_use_rules);
