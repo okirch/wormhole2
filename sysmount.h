@@ -74,6 +74,7 @@ extern bool			fsutil_mount(const char *device,
 					const char *fstype,
 					const char *options,
 					int flags);
+extern bool			fsutil_mount_move(const char *source, const char *target);
 extern bool			fsutil_mount_request(const fsutil_mount_req_t *mr);
 extern bool			fsutil_lazy_umount(const char *path);
 extern bool			fsutil_make_fs_private(const char *dir, bool maybe_in_chroot);

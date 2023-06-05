@@ -26,6 +26,11 @@ struct mount_farm {
 
 	unsigned int	num_mounts;
 
+	/* This is set for host-based overlays, and will
+	 * move the assembled mounts into place
+	 * (eg /tmp/blah/bin -> /bin) */
+	bool		move_mounts_to_hostfs;
+
 	struct fstree *tree;
 };
 

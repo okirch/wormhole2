@@ -1951,6 +1951,18 @@ fsutil_mount_bind(const char *source, const char *target, bool recursive)
 }
 
 bool
+fsutil_mount_move(const char *source, const char *target)
+{
+	if (mount(source, target, NULL, MS_MOVE, NULL) < 0) {
+		log_error("Unable to move mount %s to %s: %m", source, target);
+		return false;
+	}
+
+	trace2("Successfully move mount %s to %s", source, target);
+	return true;
+}
+
+bool
 fsutil_mount_virtual_fs(const char *where, const char *fstype, const char *options)
 {
 	int flags = 0;

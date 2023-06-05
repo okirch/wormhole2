@@ -287,6 +287,7 @@ mount_farm_use_system_root(struct mount_farm *farm)
 	farm->tree->root->export_type = WORMHOLE_EXPORT_AS_IS;
 
 	farm->mount_ops.overlay = &mount_ops_overlay_host;
+	farm->move_mounts_to_hostfs = true;
 
 	return true;
 }
@@ -446,8 +447,8 @@ __mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_anc
 				fstree_node_invalidate(node);
 			}
 		}
+		break;
 
-		/* fallthru */
 	case EXPORT_COMBINATION(TRANSPARENT, STACKED):
 	case EXPORT_COMBINATION(TRANSPARENT, SEMITRANSPARENT):
 	case EXPORT_COMBINATION(AS_IS, STACKED):
@@ -716,10 +717,32 @@ __mount_farm_mount_one(const struct fstree_node *node)
 bool
 mount_farm_mount_all(struct mount_farm *farm)
 {
+	struct fstree_iter *iter;
+
 	num_mounted = 0;
 
 	if (!fstree_node_traverse(farm->tree->root, __mount_farm_mount_one))
 		return false;
+
+	if (farm->move_mounts_to_hostfs) {
+		struct fstree_node *node;
+		bool okay = true;
+
+		trace("Moving all mounts to their final location in the host FS");
+		iter = fstree_iterator_new(farm->tree, false);
+		while (okay && (node = fstree_iterator_next(iter)) != NULL) {
+			if (node->mount_ops == NULL) {
+				/* Not a mount point */
+			} else if (!fsutil_mount_move(node->mount.mount_point, node->relative_path)) {
+				//log_error("Failed to move mount %s to %s", node->mount.mount_point, node->relative_path);
+				okay = false;
+			} else {
+				/* Skip over everything below this node. */
+				fstree_iterator_skip(iter, node);
+			}
+		}
+		fstree_iterator_free(iter);
+	}
 
 	farm->num_mounts = num_mounted;
 	return true;
