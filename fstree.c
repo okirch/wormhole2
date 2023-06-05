@@ -194,6 +194,41 @@ fstree_node_lookup(struct fstree_node *parent, const char *relative_path, bool c
 	return node;
 }
 
+struct fstree_node *
+fstree_node_closest_ancestor(struct fstree_node *parent, const char *relative_path)
+{
+	struct pathutil_parser path_parser;
+	struct fstree_node *node = NULL, *ancestor, **pos;
+
+	pathutil_parser_init(&path_parser, relative_path);
+
+	/* If the path is empty, return the node itself */
+	ancestor = parent;
+
+	pos = &parent->children;
+
+	while (pathutil_parser_next(&path_parser)) {
+		const char *name = path_parser.namebuf;
+
+		while ((node = *pos) != NULL) {
+			if (!strcmp(node->name, name))
+				break;
+			pos = &(node->next);
+		}
+
+		if (node == NULL)
+			break;
+
+		if (node->export_type != WORMHOLE_EXPORT_NONE)
+			ancestor = node;
+
+		parent = node;
+		pos = &node->children;
+	}
+
+	return ancestor;
+}
+
 /*
  * Given a fnmatch pattern, mark all tree nodes as hidden.
  */

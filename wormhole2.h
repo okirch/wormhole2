@@ -261,6 +261,7 @@ extern struct fstree_node *	fstree_node_new(const char *name, const char *relati
 extern bool			fstree_node_is_mountpoint(const struct fstree_node *leaf);
 extern bool			fstree_node_is_below_mountpoint(const struct fstree_node *leaf);
 extern struct fstree_node *	fstree_node_lookup(struct fstree_node *parent, const char *relative_path, bool create);
+extern struct fstree_node *	fstree_node_closest_ancestor(struct fstree_node *parent, const char *relative_path);
 extern char *			fstree_node_relative_path(struct fstree_node *ancestor, struct fstree_node *node);
 extern bool			fstree_node_set_fstype(struct fstree_node *leaf, mount_ops_t *ops, struct mount_farm *farm);
 extern void			fstree_node_reset(struct fstree_node *leaf);
