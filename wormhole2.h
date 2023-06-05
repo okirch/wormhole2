@@ -302,6 +302,7 @@ extern bool			wormhole_layer_create_default_wrapper_symlinks(struct wormhole_lay
 extern bool			wormhole_layer_write_wrappers(struct wormhole_layer *layer, const char *install_bindir);
 extern void			wormhole_layer_array_append(struct wormhole_layer_array *a, struct wormhole_layer *layer);
 extern void			wormhole_layer_array_append_unique(struct wormhole_layer_array *a, struct wormhole_layer *layer);
+extern void			wormhole_layer_array_prepend_unique(struct wormhole_layer_array *a, struct wormhole_layer *layer);
 extern struct wormhole_layer *	wormhole_layer_array_find(struct wormhole_layer_array *a, const char *name);
 extern void			wormhole_layer_array_destroy(struct wormhole_layer_array *a);
 extern char *			wormhole_layer_make_path(const char *name, int target_type);

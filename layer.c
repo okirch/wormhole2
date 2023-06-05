@@ -228,18 +228,43 @@ wormhole_layer_array_append(struct wormhole_layer_array *a, struct wormhole_laye
 }
 
 void
-wormhole_layer_array_append_unique(struct wormhole_layer_array *a, struct wormhole_layer *layer)
+wormhole_layer_array_prepend(struct wormhole_layer_array *a, struct wormhole_layer *layer)
+{
+	if ((a->count & 15) == 0) {
+		a->data = realloc(a->data, (a->count + 16) * sizeof(a->data[0]));
+	}
+
+	memmove(a->data + 1, a->data, a->count * sizeof(a->data[0]));
+	a->data[0] = wormhole_layer_hold(layer);
+	a->count += 1;
+}
+
+static inline bool
+wormhole_layer_has(const struct wormhole_layer_array *a, const struct wormhole_layer *layer)
 {
 	unsigned int i;
 
 	for (i = 0; i < a->count; ++i) {
 		if (a->data[i] == layer)
-			return;
+			return true;
 	}
 
-	wormhole_layer_array_append(a, layer);
+	return false;
 }
 
+void
+wormhole_layer_array_append_unique(struct wormhole_layer_array *a, struct wormhole_layer *layer)
+{
+	if (!wormhole_layer_has(a, layer))
+		wormhole_layer_array_append(a, layer);
+}
+
+void
+wormhole_layer_array_prepend_unique(struct wormhole_layer_array *a, struct wormhole_layer *layer)
+{
+	if (!wormhole_layer_has(a, layer))
+		wormhole_layer_array_prepend(a, layer);
+}
 
 struct wormhole_layer *
 wormhole_layer_array_find(struct wormhole_layer_array *a, const char *name)
