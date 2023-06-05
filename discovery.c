@@ -226,6 +226,9 @@ wormhole_attachment_rule_track_changes(const fsutil_mount_cursor_t *cursor, cons
 
 	wormhole_layer_array_append(&node->attached_layers, system_layer);
 	node->mount_ops = &mount_ops_overlay;
+
+	/* Setting this flag will cause the upperdir to be scanned for changes */
+	node->export_flags |= FSTREE_NODE_F_TRACK;
 	return true;
 }
 

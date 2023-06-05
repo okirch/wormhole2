@@ -172,6 +172,8 @@ mount_farm_merge_system_mounts(struct mount_farm *farm, struct fstree *fstree)
 					wormhole_layer_array_append(&new_mount->attached_layers, l);
 				}
 			}
+
+			new_mount->export_flags |= (node->export_flags & FSTREE_NODE_F_TRACK);
 		}
 	}
 
@@ -1028,46 +1030,74 @@ out:
 static bool
 record_modified_mounts_to_layer(struct wormhole_context *ctx, struct wormhole_layer *new_layer)
 {
-	struct mount_farm *farm = ctx->farm;
-	char *image_root = NULL;
-	unsigned int i;
+	struct fstree *fstree = ctx->farm->tree;
+	struct fsutil_ftw_ctx *ftw;
+	struct fsutil_ftw_cursor cursor;
 
-	assert(ctx->build.root);
-
-	if (!mount_farm_set_upper_base(farm, ctx->build.root))
+	if (!(ftw = fsutil_ftw_open("/", FSUTIL_FTW_NEED_STAT, new_layer->image_path)))
 		return false;
 
-	if (!wormhole_context_resolve_layers(ctx))
-		return false;
+	while (fsutil_ftw_next(ftw, &cursor)) {
+		struct fstree_node *node;
 
-	if (!wormhole_context_remount_layers(ctx))
-		return false;
-
-	trace("Applying layers");
-	pathutil_concat2(&image_root, ctx->build.root, "image");
-	for (i = 0; i < ctx->layer.array.count; ++i) {
-		struct wormhole_layer *layer = ctx->layer.array.data[i];
-		unsigned int j;
-
-		for (j = 0; j < layer->mounts.count; ++j) {
-			struct mount_config *mnt = layer->mounts.data[j];
-			const char *image_dir_path;
-
-			if (mnt->origin != MOUNT_ORIGIN_LAYER)
-				continue;
-
-			image_dir_path = __pathutil_concat2(image_root, mnt->path);
-			if (fsutil_exists(image_dir_path)) {
-				if (!mount_config_array_append(&new_layer->mounts, mnt)) {
-					log_error("Cannot add %s to layer's stacked mounts", mnt->path);
-					return false;
-				}
-				trace("  %s: add to stacked mounts", mnt->path);
-			}
+		node = fstree_node_closest_ancestor(fstree->root, cursor.relative_path);
+		if (node == NULL) {
+			log_warning("Cannot identify a mount point for %s", cursor.relative_path);
+			continue;
 		}
+
+		trace("%s belongs to %s%s", cursor.relative_path, node->relative_path,
+				(node->export_flags & FSTREE_NODE_F_TRACK)? "" : " (ignored)");
+
+		if (!(node->export_flags & FSTREE_NODE_F_TRACK))
+			continue;
+
+		if (!strcmp(node->relative_path, "/")) {
+			const char *tld;
+
+			/* If we track "/", and find a newly added file like /usr/bin/frobber, then
+			 * insert an extra tracking node at /usr */
+			if (!(tld = pathutil_toplevel_dirname(cursor.relative_path))
+			 || !(node = fstree_node_lookup(fstree->root, tld, true))) {
+				log_error("%s: cannot handle %s", __func__, cursor.relative_path);
+				continue;
+			}
+
+			node->export_flags |= FSTREE_NODE_F_TRACK;
+		}
+
+		if (node->export_flags & FSTREE_NODE_F_MODIFIED)
+			continue;
+
+		trace("  Need to insert a transparent mount for %s", node->relative_path);
+		mount_config_array_add(&new_layer->mounts, node->relative_path,
+				__fsutil_get_dtype(cursor.st),
+				MOUNT_ORIGIN_LAYER,
+				MOUNT_MODE_OVERLAY);
+
+		node->export_flags |= FSTREE_NODE_F_MODIFIED;
+	}
+	fsutil_ftw_ctx_free(ftw);
+	return true;
+}
+
+static bool
+prune_empty_mountpoints(struct wormhole_context *ctx, struct wormhole_layer *new_layer)
+{
+	struct mount_farm *farm = ctx->farm;
+	struct fstree_iter *iter;
+	struct fstree_node *node;
+
+	/* it's important that we perform a depth-first traversal so that we
+	 * map any modifications to the proper overlay. */
+	iter = fstree_iterator_new(farm->tree, true);
+	while ((node = fstree_iterator_next(iter)) != NULL) {
+		/* This is somewhat lame and incomplete, in that we do not catch any dirs
+		 * that were created for mounts like /proc/something */
+		if (node->upper)
+			fsutil_remove_empty_dir_and_parents(node->relative_path, new_layer->image_path);
 	}
 
-	free(image_root);
 	return true;
 }
 
@@ -1173,6 +1203,7 @@ do_build(struct wormhole_context *ctx)
 		strutil_array_append(&layer->used, name);
 	}
 
+	prune_empty_mountpoints(ctx, layer);
 	record_modified_mounts_to_layer(ctx, layer);
 
 	if (ctx->manage_rpmdb) {

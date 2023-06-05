@@ -53,6 +53,8 @@ typedef const struct mount_ops {
 
 #define FSTREE_NODE_F_READONLY	0x0001
 #define FSTREE_NODE_F_MAYREPLACE 0x0002
+#define FSTREE_NODE_F_TRACK	0x0004
+#define FSTREE_NODE_F_MODIFIED	0x0008
 
 struct fstree_node {
 	struct fstree_node *parent;
