@@ -557,7 +557,7 @@ wormhole_context_mount_tree(struct wormhole_context *ctx)
 }
 
 static bool
-prepare_tree_for_building(struct wormhole_context *ctx)
+define_tree_for_building(struct wormhole_context *ctx)
 {
 	struct mount_farm *farm = ctx->farm;
 
@@ -570,10 +570,17 @@ prepare_tree_for_building(struct wormhole_context *ctx)
 	if (!wormhole_context_resolve_layers(ctx))
 		return false;
 
-	if (ctx->remount_layers && !wormhole_context_remount_layers(ctx))
+	if (!wormhole_context_define_mount_tree(ctx))
 		return false;
 
-	if (!wormhole_context_define_mount_tree(ctx))
+	return true;
+}
+
+static bool
+prepare_tree_for_building(struct wormhole_context *ctx)
+{
+	trace("%s()", __func__);
+	if (ctx->remount_layers && !wormhole_context_remount_layers(ctx))
 		return false;
 
 	/* In order for unprivileged user builds to work properly, we need to "copy up" at least
@@ -934,10 +941,6 @@ prune_new_image(struct wormhole_context *ctx)
 	struct fstree_iter *it;
 	struct fstree_node *node;
 
-	ctx->remount_layers = false;
-	if (!prepare_tree_for_building(ctx))
-		return false;
-
 	pathutil_concat2(&image_root, ctx->build.root, "image");
 	trace("Pruning image tree:");
 
@@ -1148,6 +1151,10 @@ do_build(struct wormhole_context *ctx)
 		return;
 	}
 #endif
+
+	trace("Defining mount tree");
+	if (!define_tree_for_building(ctx))
+		return;
 
 	trace("Performing build stage");
 	if (!wormhole_context_perform_in_container(ctx, __perform_build, false))
