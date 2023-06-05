@@ -97,7 +97,6 @@ system_mount_tree_discover_boot(struct fstree *fstree)
 	/* When we get here, we have already mounted the root FS */
 	if (fstree->root)
 		fstree_node_reset(fstree->root);
-	trace("root=%p ops=%s", fstree->root, fstree->root->mount_ops);
 #else
 	if (fstree->root == NULL || fstree->root->mount_ops == NULL) {
 		log_error("%s: could not find a file system for / in %s/etc/fstab",

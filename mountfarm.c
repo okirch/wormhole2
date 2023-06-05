@@ -203,14 +203,12 @@ mount_farm_new(int purpose, const char *farm_root)
 		pathutil_concat2(&farm->upper_base, farm_root, "upper");
 		pathutil_concat2(&farm->work_base, farm_root, "work");
 		pathutil_concat2(&farm->chroot, farm_root, "root");
-
-		farm->tree = fstree_new(farm->chroot);
-		farm->tree->root->export_type = WORMHOLE_EXPORT_ROOT;
 	} else {
 		strutil_set(&farm->chroot, farm_root);
-		farm->tree = fstree_new(farm->chroot);
-		farm->tree->root->export_type = WORMHOLE_EXPORT_NONE;
 	}
+
+	farm->tree = fstree_new(farm->chroot);
+	farm->tree->root->export_type = WORMHOLE_EXPORT_NONE;
 
 	return farm;
 }
@@ -395,6 +393,8 @@ __mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_anc
 		}
 	}
 
+	if (node == closest_ancestor)
+		goto skip_propagation;
 
 #define EXPORT_COMBINATION(ancestor, self) \
 	((WORMHOLE_EXPORT_##ancestor) << 8 | (WORMHOLE_EXPORT_##self))
@@ -428,9 +428,25 @@ __mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_anc
 		break;
 
 	case EXPORT_COMBINATION(TRANSPARENT, TRANSPARENT):
+		if (node->mount_ops == closest_ancestor->mount_ops && node->mount_ops == &mount_ops_bind) {
+			const char *mount_relative, *origin_relative;
+
+			mount_relative = fsutil_strip_path_prefix(node->full_path, closest_ancestor->full_path);
+			origin_relative = fsutil_strip_path_prefix(node->relative_path, closest_ancestor->relative_path);
+			if (strutil_equal(mount_relative, origin_relative)) {
+				trace3("%*.*s - dropping %s because it's a subordinate bind mount of %s",
+					node->depth, node->depth, "",
+					node->relative_path, closest_ancestor->relative_path);
+				fstree_node_invalidate(node);
+			}
+		}
+
+		/* fallthru */
 	case EXPORT_COMBINATION(TRANSPARENT, STACKED):
 	case EXPORT_COMBINATION(TRANSPARENT, SEMITRANSPARENT):
-		/* We're adding a mount inside some transparent
+	case EXPORT_COMBINATION(AS_IS, STACKED):
+	case EXPORT_COMBINATION(AS_IS, SEMITRANSPARENT):
+		/* We're adding a mount inside some other
 		 * mount. All we can do is hope that someone created the
 		 * mount point for us.
 		 */
@@ -481,6 +497,7 @@ __mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_anc
 		break;
 	}
 
+skip_propagation:
 	if (node->export_type != WORMHOLE_EXPORT_NONE)
 		closest_ancestor = node;
 
@@ -495,10 +512,12 @@ __mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_anc
 
 		/* If this is a system mount point that we use as-is, and the node
 		 * has zero children, we might as well prune it. */
-		if (child->export_type == WORMHOLE_EXPORT_AS_IS && child->children == NULL) {
-			trace3("%*.*s - pruning empty as-is node %s",
+		if (child->children == NULL
+		 && (child->export_type == WORMHOLE_EXPORT_AS_IS || child->export_type == WORMHOLE_EXPORT_NONE)) {
+			trace3("%*.*s - pruning empty node %s (type %s)",
 					child->depth, child->depth, "",
-					child->relative_path);
+					child->relative_path,
+					mount_export_type_as_string(child->export_type));
 			*child_pos = child->next;
 			fstree_node_free(child);
 		} else {
