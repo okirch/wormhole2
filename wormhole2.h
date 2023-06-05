@@ -133,6 +133,11 @@ enum {
 };
 
 enum {
+	WORMHOLE_BASE_LAYER_HOST = 1,
+	WORMHOLE_BASE_LAYER_CONTAINER,
+};
+
+enum {
 	LAYER_TYPE_USER = 0,
 	LAYER_TYPE_SITE,
 	LAYER_TYPE_SYSTEM,
@@ -271,6 +276,7 @@ fstree_node_fstype(const struct fstree_node *node)
 
 extern void			wormhole_layer_config_destroy(struct wormhole_layer_config *);
 extern bool			wormhole_layer_config_use_system_root(const struct wormhole_layer_config *);
+extern int			wormhole_layer_config_base_layer_type(const struct wormhole_layer_config *);
 extern void			wormhole_layer_set_default_search_path(void);
 extern void			wormhole_layer_print_default_search_path(void);
 extern struct wormhole_layer *	wormhole_layer_new(const char *name, const char *path, unsigned int depth);

@@ -113,6 +113,14 @@ wormhole_layer_config_use_system_root(const struct wormhole_layer_config *layerc
 	return strutil_equal(root_layer->image_path, "/");
 }
 
+int
+wormhole_layer_config_base_layer_type(const struct wormhole_layer_config *layercfg)
+{
+	if (wormhole_layer_config_use_system_root(layercfg))
+		return WORMHOLE_BASE_LAYER_HOST;
+	return WORMHOLE_BASE_LAYER_CONTAINER;
+}
+
 /*
  * Create a new layer object. Try to locate the layer image and config.
  */
