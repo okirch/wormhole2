@@ -7,6 +7,7 @@
 
 typedef struct mount_farm mount_farm_t;
 typedef struct fstree_node fstree_node_t;
+typedef const struct mount_ops	mount_ops_t;
 
 struct wormhole_layer_array {
 	unsigned int		count;
@@ -17,6 +18,11 @@ struct mount_farm {
 	char *		upper_base;
 	char *		work_base;
 	char *		chroot;
+
+	struct {
+		mount_ops_t *overlay;
+		mount_ops_t *bind;
+	} mount_ops;
 
 	unsigned int	num_mounts;
 
@@ -46,10 +52,10 @@ enum {
 	WORMHOLE_EXPORT_HIDE,
 };
 
-typedef const struct mount_ops {
+struct mount_ops {
 	const char *		name;
 	bool			(*mount)(const struct fstree_node *);
-} mount_ops_t;
+};
 
 #define FSTREE_NODE_F_READONLY	0x0001
 #define FSTREE_NODE_F_MAYREPLACE 0x0002

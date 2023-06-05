@@ -210,6 +210,10 @@ mount_farm_new(int purpose, const char *farm_root)
 	farm->tree = fstree_new(farm->chroot);
 	farm->tree->root->export_type = WORMHOLE_EXPORT_NONE;
 
+	/* Default operations to be used for mounts */
+	farm->mount_ops.overlay = &mount_ops_overlay;
+	farm->mount_ops.bind = &mount_ops_bind;
+
 	return farm;
 }
 
@@ -595,6 +599,23 @@ mount_farm_add_transparent(struct mount_farm *farm, const char *system_path, int
 	return fstree_add_export(farm->tree, system_path, WORMHOLE_EXPORT_TRANSPARENT, dtype, layer, 0);
 }
 
+static inline struct fstree_node *
+__mount_farm_add_mount(struct mount_farm *farm, const struct mount_config *mnt, int export_type, struct wormhole_layer *layer, int flags)
+{
+	struct fstree_node *new_mount;
+
+	new_mount = fstree_add_export(farm->tree, mnt->path, export_type, mnt->dtype, layer, flags);
+	if (new_mount) {
+		if (mnt->mode == MOUNT_MODE_OVERLAY)
+                        fstree_node_set_fstype(new_mount, farm->mount_ops.overlay, farm);
+                else if (mnt->mode == MOUNT_MODE_BIND)
+                        fstree_node_set_fstype(new_mount, farm->mount_ops.bind, farm);
+
+	}
+
+	return new_mount;
+}
+
 struct fstree_node *
 mount_farm_add_mount(struct mount_farm *farm, const struct mount_config *mnt, struct wormhole_layer *layer)
 {
@@ -614,7 +635,8 @@ mount_farm_add_mount(struct mount_farm *farm, const struct mount_config *mnt, st
 		log_error("%s: cannot add %s: invalid combination of origin/mode", __func__, mnt->path);
 		return false;
 	}
-	return fstree_add_export(farm->tree, mnt->path, export_type, mnt->dtype, layer, flags);
+
+	return __mount_farm_add_mount(farm, mnt, export_type, layer, flags);
 }
 
 bool
@@ -664,7 +686,7 @@ mount_farm_add_missing_children(struct mount_farm *farm, const char *system_path
 				goto out;
 			}
 			trace3("%s: added a bind mount for %s", __func__, child->relative_path);
-			fstree_node_set_fstype(child, &mount_ops_bind, farm);
+			fstree_node_set_fstype(child, farm->mount_ops.bind, farm);
 		}
 	}
 

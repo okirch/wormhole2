@@ -682,12 +682,6 @@ wormhole_layer_build_mount_farm(struct wormhole_layer *layer, struct mount_farm 
 
 		if (!(new_mount = mount_farm_add_mount(farm, mnt, layer)))
 			return false;
-
-		if (mnt->mode == MOUNT_MODE_OVERLAY)
-			fstree_node_set_fstype(new_mount, &mount_ops_overlay, farm);
-		else
-		if (mnt->mode == MOUNT_MODE_BIND)
-			fstree_node_set_fstype(new_mount, &mount_ops_bind, farm);
 	}
 
 	return true;
