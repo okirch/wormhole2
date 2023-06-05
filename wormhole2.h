@@ -213,6 +213,7 @@ struct wormhole_context {
 #define FSTREE_QUIET			0x0002
 
 extern mount_ops_t		mount_ops_overlay;
+extern mount_ops_t		mount_ops_overlay_host;
 extern mount_ops_t		mount_ops_bind;
 extern mount_ops_t		mount_ops_tmpfs;
 extern mount_ops_t		mount_ops_mountcmd;
@@ -274,7 +275,7 @@ extern char *			fstree_node_relative_path(struct fstree_node *ancestor, struct f
 extern bool			fstree_node_set_fstype(struct fstree_node *leaf, mount_ops_t *ops, struct mount_farm *farm);
 extern void			fstree_node_reset(struct fstree_node *leaf);
 extern bool			fstree_node_add_lower(struct fstree_node *leaf, const char *path);
-extern char *			fstree_node_build_lowerspec(const struct fstree_node *leaf);
+extern char *			fstree_node_build_lowerspec(const struct fstree_node *leaf, bool include_host_dir);
 extern void			fstree_node_invalidate(struct fstree_node *leaf);
 extern bool			fstree_node_zap_dirs(struct fstree_node *leaf);
 extern bool			fstree_node_mount(const struct fstree_node *leaf);

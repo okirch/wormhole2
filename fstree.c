@@ -391,7 +391,7 @@ fstree_node_invalidate(struct fstree_node *node)
 }
 
 char *
-fstree_node_build_lowerspec(const struct fstree_node *node)
+fstree_node_build_lowerspec(const struct fstree_node *node, bool include_host_dir)
 {
 	const struct wormhole_layer_array *layers = &node->attached_layers;
 	struct strutil_array dirs = { 0, };
@@ -409,6 +409,9 @@ fstree_node_build_lowerspec(const struct fstree_node *node)
 		log_error("Cannot build lowerdir spec for %s: no directories given", node->relative_path);
 		return NULL;
 	}
+
+	if (include_host_dir && strcmp(dirs.data[dirs.count-1], node->relative_path))
+		strutil_array_append(&dirs, node->relative_path);
 
 	result = strutil_array_join(&dirs, ":");
 	strutil_array_destroy(&dirs);
@@ -462,7 +465,7 @@ mount_ops_t	mount_ops_bind = {
  * Implementation for overlay mounts
  */
 static bool
-__fstree_node_mount_overlay(const struct fstree_node *node)
+__fstree_node_mount_overlay_common(const struct fstree_node *node, bool include_host_dir)
 {
 	char options[3 * PATH_MAX + 100];
 	char *lowerspec;
@@ -476,7 +479,7 @@ __fstree_node_mount_overlay(const struct fstree_node *node)
 	 || !fsutil_makedirs(node->mount.mount_point, 0755))
 		return false;
 
-	if (!(lowerspec = fstree_node_build_lowerspec(node)))
+	if (!(lowerspec = fstree_node_build_lowerspec(node, include_host_dir)))
 		return false;
 
 	if (!(node->export_flags & FSTREE_NODE_F_READONLY))
@@ -502,9 +505,29 @@ __fstree_node_mount_overlay(const struct fstree_node *node)
 	return true;
 }
 
+static bool
+__fstree_node_mount_overlay(const struct fstree_node *node)
+{
+	return __fstree_node_mount_overlay_common(node, false);
+}
+
 mount_ops_t	mount_ops_overlay = {
 	.name		= "overlay",
 	.mount		= __fstree_node_mount_overlay,
+};
+
+/*
+ * Implementation for overlay mounts with the lowest layer being the host FS
+ */
+static bool
+__fstree_node_mount_overlay_host(const struct fstree_node *node)
+{
+	return __fstree_node_mount_overlay_common(node, true);
+}
+
+mount_ops_t	mount_ops_overlay_host = {
+	.name		= "host-overlay",
+	.mount		= __fstree_node_mount_overlay_host,
 };
 
 /*

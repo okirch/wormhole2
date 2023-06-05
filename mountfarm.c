@@ -286,6 +286,8 @@ mount_farm_use_system_root(struct mount_farm *farm)
 	farm->tree = fstree_new(NULL);
 	farm->tree->root->export_type = WORMHOLE_EXPORT_AS_IS;
 
+	farm->mount_ops.overlay = &mount_ops_overlay_host;
+
 	return true;
 }
 
