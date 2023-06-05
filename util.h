@@ -42,6 +42,7 @@ struct fsutil_tempdir {
 
 extern const char *		pathutil_const_basename(const char *path);
 extern const char *		pathutil_dirname(const char *path);
+extern const char *		pathutil_toplevel_dirname(const char *path);
 extern char *			pathutil_sanitize(const char *path);
 extern void			pathutil_concat2(char **path_p, const char *parent, const char *name);
 extern char *			pathutil_expand(const char *orig_path, bool quiet);
@@ -110,6 +111,7 @@ extern bool			fsutil_exists(const char *path);
 extern bool			fsutil_exists_nofollow(const char *path);
 extern bool			fsutil_is_executable(const char *path);
 extern bool			fsutil_remove_recursively(const char *dir_path);
+extern bool			fsutil_remove_empty_dir_and_parents(const char *dir_path, const char *root);
 extern const char *		fsutil_get_filesystem_type(const char *path);
 
 /* ftw input flags */

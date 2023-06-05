@@ -121,6 +121,26 @@ pathutil_dirname(const char *path)
 	return dirname(buffer);
 }
 
+const char *
+pathutil_toplevel_dirname(const char *path)
+{
+	static char buffer[PATH_MAX];
+	char *s, *tld;
+
+	strncpy(buffer, path, sizeof(buffer));
+
+	tld = buffer;
+	for (s = buffer; *s == '/'; ++s)
+		tld = s;
+
+	/* No top-level dir name for root */
+	if (*s == '\0')
+		return NULL;
+
+	s[strcspn(s, "/")] = '\0';
+	return tld;
+}
+
 /*
  * Sanitize path.
  * Compress repeated / and remove trailing ones.
@@ -1524,12 +1544,10 @@ fsutil_ftw_open(const char *dir_path, int flags, const char *root_dir)
 {
 	struct fsutil_ftw_ctx *ctx;
 	struct fsutil_ftw_level *dir;
-	char full_path[PATH_MAX];
+	char *full_path = NULL;
 
 	if (root_dir) {
-		while (*dir_path == '/')
-			++dir_path;
-		snprintf(full_path, sizeof(full_path), "%s/%s", root_dir, dir_path);
+		pathutil_concat2(&full_path, root_dir, dir_path);
 		dir_path = full_path;
 	}
 
@@ -1584,6 +1602,7 @@ fsutil_ftw_open(const char *dir_path, int flags, const char *root_dir)
 failed:
 	if (ctx)
 		fsutil_ftw_ctx_free(ctx);
+	strutil_drop(&full_path);
 	return NULL;
 }
 
@@ -1728,6 +1747,33 @@ fsutil_remove_recursively(const char *dir_path)
 	}
 
 	return ok;
+}
+
+bool
+fsutil_remove_empty_dir_and_parents(const char *dir_path, const char *root)
+{
+	static char buffer[PATH_MAX];
+
+	strncpy(buffer, dir_path, sizeof(buffer));
+	while (*buffer) {
+		const char *path = buffer;
+		char *slash;
+
+		if (root)
+			path = __pathutil_concat2(root, path);
+
+		if (rmdir(path) < 0 && errno != ENOENT)
+			break;
+
+		if ((slash = strrchr(buffer, '/')) == NULL)
+			break;
+
+		while (slash > buffer && slash[-1] == '/')
+			--slash;
+		*slash = '\0';
+	}
+
+	return true;
 }
 
 bool
