@@ -351,13 +351,13 @@ fstree_node_set_fstype(struct fstree_node *node, mount_ops_t *mount_ops, struct 
 
 	/* FIXME - we only need to set upper and work for transparent mounts */
 	if (!node->upper)
-		strutil_set(&node->upper, fsutil_makedir2(farm->upper_base, node->relative_path));
+		pathutil_concat2(&node->upper, farm->upper_base, node->relative_path);
 
 	if (!node->work)
-		strutil_set(&node->work, fsutil_makedir2(farm->work_base, node->relative_path));
+		pathutil_concat2(&node->work, farm->work_base, node->relative_path);
 
 	if (!node->mount.mount_point)
-		strutil_set(&node->mount.mount_point, fsutil_makedir2(farm->chroot, node->relative_path));
+		pathutil_concat2(&node->mount.mount_point, farm->chroot, node->relative_path);
 
 	return node->upper && node->work && node->mount.mount_point;
 }
@@ -470,6 +470,11 @@ __fstree_node_mount_overlay(const struct fstree_node *node)
 	if (node->dtype >= 0 && node->dtype != DT_DIR && node->dtype != DT_REG && node->dtype != DT_LNK)
 		log_warning("%s is a %s; building an overlay will probably fail",
 				node->relative_path, fsutil_dtype_as_string(node->dtype));
+
+	if (!fsutil_makedirs(node->upper, 0755)
+	 || !fsutil_makedirs(node->work, 0755)
+	 || !fsutil_makedirs(node->mount.mount_point, 0755))
+		return false;
 
 	if (!(lowerspec = fstree_node_build_lowerspec(node)))
 		return false;
