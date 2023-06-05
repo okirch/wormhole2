@@ -363,6 +363,89 @@ __mount_farm_fudge_non_directory(struct fstree_node *node, struct fstree_node *c
 	return false;
 }
 
+/*
+ * This is some rather special hack.
+ * When you do a user overlay mount in Linux, it will not allow you to use /usr as lowerdir if
+ * something is mounted on /usr/local.
+ * The reason behind that seems to be related to "locked mounts", and the rationale for that
+ * is that a user should not be allowed to see the original contents of /usr/local - only
+ * the stuff that the admin mounted on top of it.
+ *
+ * So when we get into the situation that we have to overlay stuff on top of /usr, we need
+ * to detect this situation and split up the overlay of /usr into separate overlays of
+ * /usr/bin, /usr/lib, etc.
+ */
+static bool
+__mount_farm_pushdown_overlays(struct fstree_node *node, struct mount_farm *farm)
+{
+	struct fstree_node *child;
+
+	if (node->children == NULL)
+		return true;
+
+	if (node->mount_ops == &mount_ops_overlay_host) {
+		unsigned int n;
+
+		for (n = node->attached_layers.count; n--; ) {
+			struct wormhole_layer *layer = node->attached_layers.data[n];
+			const char *image_path = __pathutil_concat2(layer->image_path, node->relative_path);
+			char *child_path = NULL;
+			DIR *dir;
+			struct dirent *d;
+			bool okay = true;
+
+			trace("Checking %s", image_path);
+			dir = opendir(image_path);
+			while ((d = readdir(dir)) != NULL) {
+				if (!strcmp(d->d_name, ".") || !strcmp(d->d_name, ".."))
+					continue;
+
+				pathutil_concat2(&child_path, node->relative_path, d->d_name);
+
+				child = NULL;
+				if (d->d_type == DT_DIR)
+					child = fstree_add_export(farm->tree, child_path, WORMHOLE_EXPORT_STACKED, d->d_type, layer, FSTREE_QUIET);
+
+				if (child == NULL) {
+					log_warning("Layer %s provides %s which I cannot add to the mount farm", layer->name, child_path);
+					okay = false;
+					break;
+				}
+
+				fstree_node_set_fstype(child, farm->mount_ops.overlay, farm);
+			}
+			strutil_drop(&child_path);
+			closedir(dir);
+
+			if (!okay)
+				return false;
+		}
+
+		fstree_node_reset(node);
+	}
+
+	for (child = node->children; child; child = child->next) {
+		if (!__mount_farm_pushdown_overlays(child, farm))
+			return false;
+	}
+
+	return true;
+}
+
+bool
+mount_farm_pushdown_overlays(struct mount_farm *farm)
+{
+	struct fstree *fstree = farm->tree;
+
+	if (farm->mount_ops.overlay != &mount_ops_overlay_host)
+		return true;
+
+	return __mount_farm_pushdown_overlays(fstree->root, farm);
+}
+
+/*
+ * Parent/child reconciliation of mounts
+ */
 static bool
 __mount_farm_percolate(struct fstree_node *node, struct fstree_node *closest_ancestor)
 {

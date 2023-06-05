@@ -160,7 +160,12 @@ mount_farm_merge_system_mounts(struct mount_farm *farm, struct fstree *fstree)
 
 		trace("created new system mount for %s (%s)", node->relative_path, fstree_node_fstype(node));
 		if (node->export_type != WORMHOLE_EXPORT_HIDE) {
-			fstree_node_set_fstype(new_mount, node->mount_ops, farm);
+			mount_ops_t *mount_ops = node->mount_ops;
+
+			if (mount_ops == &mount_ops_overlay)
+				mount_ops = farm->mount_ops.overlay;
+
+			fstree_node_set_fstype(new_mount, mount_ops, farm);
 			new_mount->mount.detail = fsutil_mount_detail_hold(node->mount.detail);
 
 			if (node->attached_layers.count) {
@@ -270,6 +275,7 @@ wormhole_context_define_mount_tree(struct wormhole_context *ctx)
 		farm->tree->root->export_type = WORMHOLE_EXPORT_ROOT;
 
 	if (mount_farm_apply_quirks(farm)
+	 && mount_farm_pushdown_overlays(farm)
 	 && mount_farm_percolate(farm)
 	 && mount_farm_fill_holes(farm)) {
 		okay = true;

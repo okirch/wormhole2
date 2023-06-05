@@ -262,6 +262,7 @@ extern struct fstree_node *	mount_farm_add_transparent(struct mount_farm *farm, 
 					int dtype, struct wormhole_layer *layer);
 extern bool			mount_farm_add_missing_children(struct mount_farm *farm, const char *system_path);
 extern bool			mount_farm_percolate(struct mount_farm *farm);
+extern bool			mount_farm_pushdown_overlays(struct mount_farm *farm);
 extern bool			mount_farm_has_mount_for(struct mount_farm *farm, const char *path);
 extern struct fstree_node *	mount_farm_add_virtual_mount(struct mount_farm *farm, const char *system_path, const char *fstype);
 extern bool			mount_farm_mount_into(struct mount_farm *farm, const char *src, const char *dst);
