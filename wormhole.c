@@ -615,8 +615,10 @@ prepare_tree_for_building(struct wormhole_context *ctx)
 }
 
 static bool
-prepare_tree_for_use(struct wormhole_context *ctx)
+define_tree_for_use(struct wormhole_context *ctx)
 {
+	trace("%s()", __func__);
+
 	if (!wormhole_context_resolve_layers(ctx))
 		return false;
 
@@ -633,10 +635,16 @@ prepare_tree_for_use(struct wormhole_context *ctx)
 		ctx->remount_layers = false;
 	}
 
-	if (ctx->remount_layers && !wormhole_context_remount_layers(ctx))
+	if (!wormhole_context_define_mount_tree(ctx))
 		return false;
 
-	if (!wormhole_context_define_mount_tree(ctx))
+	return true;
+}
+
+static bool
+prepare_tree_for_use(struct wormhole_context *ctx)
+{
+	if (ctx->remount_layers && !wormhole_context_remount_layers(ctx))
 		return false;
 
 	return true;
@@ -1294,6 +1302,10 @@ out:
 static void
 do_run(struct wormhole_context *ctx)
 {
+	trace("Defining mount tree");
+	if (!define_tree_for_use(ctx))
+		return;
+
 	if (!wormhole_context_perform_in_container(ctx, __run_container, false))
 		return;
 
