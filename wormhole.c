@@ -380,9 +380,6 @@ wormhole_context_new(void)
 	ctx->purpose = PURPOSE_NONE;
 	ctx->exit_status = 5;
 
-	/* The default is to map the caller's uid/gid to 0 inside the new user namespace */
-	ctx->map_caller_to_root = true;
-
 	/* The default for building new layers is to auto-discover new entry points. */
 	ctx->auto_entry_points = true;
 
@@ -420,6 +417,34 @@ failed:
 	return NULL;
 }
 
+static inline void
+wormhole_context_set_flag_user(struct wormhole_context *ctx, unsigned int word)
+{
+	ctx->flags |= word;
+	ctx->flags_set_by_user |= word;
+}
+
+static inline void
+wormhole_context_clear_flag_user(struct wormhole_context *ctx, unsigned int word)
+{
+	ctx->flags &= ~word;
+	ctx->flags_set_by_user |= word;
+}
+
+static inline void
+wormhole_context_set_flag_default(struct wormhole_context *ctx, unsigned int word)
+{
+	if (!(ctx->flags_set_by_user & word))
+		ctx->flags |= word;
+}
+
+static inline void
+wormhole_context_clear_flag_default(struct wormhole_context *ctx, unsigned int word)
+{
+	if (!(ctx->flags_set_by_user & word))
+		ctx->flags &= ~word;
+}
+
 /*
  * Set up the wormhole context for a specific purpose
  */
@@ -443,6 +468,10 @@ wormhole_context_set_build(struct wormhole_context *ctx, const char *name, int t
 static void
 wormhole_context_set_build_defaults(struct wormhole_context *ctx)
 {
+	/* If the user hasn't requested otherwise, the default during build
+	 * is to map the caller's uid/gid to 0 inside the new user namespace */
+	wormhole_context_set_flag_default(ctx, WORMHOLE_F_MAP_USER_TO_ROOT);
+
 	/* In order for unprivileged user builds to work properly, we need to "copy up" at least
 	 * all the directory inodes, so that they have the correct owner. */
 	if (ctx->build.target_type == LAYER_TYPE_USER && getuid() != 0) {
@@ -533,7 +562,7 @@ wormhole_context_detach(struct wormhole_context *ctx)
 		if (!wormhole_create_namespace())
 			return false;
 	} else {
-		if (!wormhole_create_user_namespace(ctx->map_caller_to_root))
+		if (!wormhole_create_user_namespace(ctx->flags & WORMHOLE_F_MAP_USER_TO_ROOT))
 			return false;
 	}
 
@@ -678,7 +707,7 @@ wormhole_context_switch_root(struct wormhole_context *ctx)
 		}
 	}
 
-	if (ctx->map_caller_to_root) {
+	if (ctx->flags & WORMHOLE_F_MAP_USER_TO_ROOT) {
 		if (setgid(0) < 0)
 			log_fatal("Failed to setgid(0): %m\n");
 		if (setuid(0) < 0)
@@ -1409,11 +1438,11 @@ main(int argc, char **argv)
 			break;
 
 		case OPT_RUNAS_ROOT:
-			ctx->map_caller_to_root = true;
+			wormhole_context_set_flag_user(ctx, WORMHOLE_F_MAP_USER_TO_ROOT);
 			break;
 
 		case OPT_RUNAS_USER:
-			ctx->map_caller_to_root = false;
+			wormhole_context_clear_flag_user(ctx, WORMHOLE_F_MAP_USER_TO_ROOT);
 			break;
 
 		case OPT_AUTO_ENTRY_POINTS:

@@ -199,7 +199,6 @@ struct wormhole_context {
 
 	/* FIXME: replace this with flags? */
 	bool			manage_rpmdb;
-	bool			map_caller_to_root;
 	bool			use_privileged_namespace;
 	bool			running_inside_chroot;
 	bool			no_switch_root;
@@ -208,8 +207,13 @@ struct wormhole_context {
 	bool			no_selinux;
 	bool			remount_layers;
 
+	unsigned int		flags;
+	unsigned int		flags_set_by_user;
+
 	struct fsutil_tempdir	temp;
 };
+
+#define WORMHOLE_F_MAP_USER_TO_ROOT	0x0001
 
 /* Flags for fstree_add_export */
 #define FSTREE_ADD_REPLACE_LAYERS	0x0001
