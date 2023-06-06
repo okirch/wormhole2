@@ -1,4 +1,7 @@
 
+ - mariadb-admin use case: identify the (running) container to connect
+   to, mount its /run directory and enter its IPC namespace.
+
  - transparent containers
    * All system layers are "base" layers, and they are in fact podman containers
    * wormhole-layer utility
@@ -13,4 +16,3 @@
     - echo "Port 222" > /etc/ssh/sshd_config.d/alp.conf
     - Frob the SELinux setup to grant sshd access to the new port
 
- - represent bind mounts as a leaf with fstype "bind" and the source dir in lowerdir

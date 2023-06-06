@@ -43,8 +43,6 @@ struct fstree {
 	struct fstree_node *	root;		/* FIXME: rename to root_node */
 };
 
-#define MOUNT_LEAF_LOWER_MAX	8
-
 enum {
 	WORMHOLE_EXPORT_ERROR = -1,
 	WORMHOLE_EXPORT_NONE,

@@ -1958,7 +1958,7 @@ fsutil_mount_move(const char *source, const char *target)
 		return false;
 	}
 
-	trace2("Successfully move mount %s to %s", source, target);
+	trace2("Successfully moved mount %s to %s", source, target);
 	return true;
 }
 

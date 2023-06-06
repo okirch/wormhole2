@@ -374,7 +374,7 @@ fstree_node_reset(struct fstree_node *node)
 }
 
 /*
- * Change a node from a mount to in internal, non-mount node
+ * Change a node from a mount to an internal, non-mount node
  */
 void
 fstree_node_invalidate(struct fstree_node *node)
