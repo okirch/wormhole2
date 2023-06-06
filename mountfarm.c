@@ -814,15 +814,9 @@ mount_farm_mount_all(struct mount_farm *farm)
 		trace("Moving all mounts to their final location in the host FS");
 		iter = fstree_iterator_new(farm->tree, false);
 		while (okay && (node = fstree_iterator_next(iter)) != NULL) {
-			if (node->mount_ops == NULL) {
-				/* Not a mount point */
-			} else if (!fsutil_mount_move(node->mount.mount_point, node->relative_path)) {
-				//log_error("Failed to move mount %s to %s", node->mount.mount_point, node->relative_path);
-				okay = false;
-			} else {
-				/* Skip over everything below this node. */
-				fstree_iterator_skip(iter, node);
-			}
+			/* If it's a mount point, move it from /tmp/mounts.XXX/path to /path */
+			if (node->mount_ops != NULL)
+				okay = fsutil_mount_move(node->mount.mount_point, node->relative_path);
 		}
 		fstree_iterator_free(iter);
 	}
