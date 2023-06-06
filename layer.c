@@ -99,29 +99,6 @@ wormhole_layer_print_default_search_path(void)
 }
 
 /*
- * Handle layer configuration object
- */
-bool
-wormhole_layer_config_use_system_root(const struct wormhole_layer_config *layercfg)
-{
-	struct wormhole_layer *root_layer;
-
-	if (layercfg->array.count == 0)
-		return false;
-
-	root_layer = layercfg->array.data[0];
-	return strutil_equal(root_layer->image_path, "/");
-}
-
-int
-wormhole_layer_config_base_layer_type(const struct wormhole_layer_config *layercfg)
-{
-	if (wormhole_layer_config_use_system_root(layercfg))
-		return WORMHOLE_BASE_LAYER_HOST;
-	return WORMHOLE_BASE_LAYER_CONTAINER;
-}
-
-/*
  * Create a new layer object. Try to locate the layer image and config.
  */
 struct wormhole_layer *
@@ -623,6 +600,10 @@ wormhole_layers_resolve(struct wormhole_layer_config *layercfg)
 	if (!root_layer->is_root)
 		goto missing_root_layer;
 
+	layercfg->base_layer_type = WORMHOLE_BASE_LAYER_CONTAINER;
+	if (strutil_equal(root_layer->image_path, "/"))
+		layercfg->base_layer_type = WORMHOLE_BASE_LAYER_HOST;
+
 	for (i = 1; i < layercfg->array.count; ++i) {
 		if (layercfg->array.data[i]->is_root) {
 			log_error("Misconfiguration - cannot run with two different root layers (%s and %s)",
@@ -632,7 +613,8 @@ wormhole_layers_resolve(struct wormhole_layer_config *layercfg)
 		}
 	}
 
-	trace("configured %u layers", layercfg->array.count);
+	trace("configured %u layers, using %s as base layer", layercfg->array.count,
+			(layercfg->base_layer_type == WORMHOLE_BASE_LAYER_HOST)? "the host filesystem" : "a container image");
 	return true;
 
 missing_root_layer:

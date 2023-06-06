@@ -262,7 +262,7 @@ wormhole_context_define_mount_tree(struct wormhole_context *ctx)
 	}
 
 	trace("Discovering system mounts");
-	fstree = system_mount_tree_discover(wormhole_layer_config_base_layer_type(&ctx->layer), ctx->purpose);
+	fstree = system_mount_tree_discover(ctx->layer.base_layer_type, ctx->purpose);
 	if (fstree == NULL) {
 		log_error("Mount state discovery failed\n");
 		goto out;
@@ -622,7 +622,7 @@ define_tree_for_use(struct wormhole_context *ctx)
 	if (!wormhole_context_resolve_layers(ctx))
 		return false;
 
-	if (wormhole_layer_config_use_system_root(&ctx->layer)) {
+	if (ctx->layer.base_layer_type == WORMHOLE_BASE_LAYER_HOST) {
 		trace("This application is configured to use the host root directory");
 
 		/* We're in USE mode, so just use the host root as-is */

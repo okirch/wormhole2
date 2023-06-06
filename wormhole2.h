@@ -161,7 +161,7 @@ enum {
 struct wormhole_layer_config {
 	/* This is where we remount the $layer/image directories to shorten the path names */
 	char *			remount_image_base;
-	bool			use_system_root;
+	int			base_layer_type;
 	struct strutil_array	names;
 	struct wormhole_layer_array array;
 };
@@ -295,8 +295,6 @@ fstree_node_fstype(const struct fstree_node *node)
 }
 
 extern void			wormhole_layer_config_destroy(struct wormhole_layer_config *);
-extern bool			wormhole_layer_config_use_system_root(const struct wormhole_layer_config *);
-extern int			wormhole_layer_config_base_layer_type(const struct wormhole_layer_config *);
 extern void			wormhole_layer_set_default_search_path(void);
 extern void			wormhole_layer_print_default_search_path(void);
 extern struct wormhole_layer *	wormhole_layer_new(const char *name, const char *path, unsigned int depth);
