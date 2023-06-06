@@ -801,6 +801,7 @@ bool
 mount_farm_mount_all(struct mount_farm *farm)
 {
 	struct fstree_iter *iter;
+	bool okay = true;
 
 	num_mounted = 0;
 
@@ -809,7 +810,6 @@ mount_farm_mount_all(struct mount_farm *farm)
 
 	if (farm->move_mounts_to_hostfs) {
 		struct fstree_node *node;
-		bool okay = true;
 
 		trace("Moving all mounts to their final location in the host FS");
 		iter = fstree_iterator_new(farm->tree, false);
@@ -828,5 +828,5 @@ mount_farm_mount_all(struct mount_farm *farm)
 	}
 
 	farm->num_mounts = num_mounted;
-	return true;
+	return okay;
 }
