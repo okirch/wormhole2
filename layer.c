@@ -560,6 +560,8 @@ __wormhole_layers_resolve(struct wormhole_layer_config *layercfg, const char *na
 		return true;
 
 	layer = wormhole_layer_new(name, NULL, depth);
+	if (layer == NULL)
+		goto failed;
 
 	if (!wormhole_layer_load_config(layer))
 		goto failed;
