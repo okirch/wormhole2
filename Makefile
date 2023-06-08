@@ -91,6 +91,8 @@ ifneq ($(MAN8PAGES),)
 	install -m 755 -d $(DESTDIR)$(MAN8DIR)
 	install -m 444 $(MAN8PAGES) $(DESTDIR)$(MAN8DIR)
 endif
+	install -m 755 -d $(DESTDIR)$(VARLIBDIR)
+	cp -av varlib/* $(DESTDIR)$(VARLIBDIR)
 
 $(WORMHOLE): $(WORMHOLE_OBJS) $(LIBDEPS)
 	$(CC) $(CFLAGS) -o $@ $(WORMHOLE_OBJS) $(LINK)
